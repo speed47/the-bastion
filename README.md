@@ -3,7 +3,7 @@
 The Bastion
 ===========
 
-Bastions are a cluster of machines used as the unique entry point by operational teams (such as sysadmins, developers, database admins, ...) to securely connect to devices (servers, virtual machines, cloud instances, network equipment, ...), usually using `ssh`.
+Bastions are a cluster of machines used as the unique entry point by operational teams (such as sysadmins, developers, database admins, ...) to securely connect to devices (servers, virtual machines, cloud instances, network equipment, ...), usually using `ssh`
 
 Bastions provides mechanisms for authentication, authorization, traceability and auditability for the whole infrastructure.
 
