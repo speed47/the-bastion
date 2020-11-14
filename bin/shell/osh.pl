@@ -901,29 +901,23 @@ if ($osh_command) {
         }
 
         OVH::Bastion::set_terminal_mode_for_plugin(plugin => $osh_command, action => 'set');
-        if (OVH::Bastion::is_bsd() && $osh_command eq 'selfMFASetupPassword') {
-            system(@cmd);
-            $fnret = R('OK', value => {sysret => $?});
+        # get the execution mode required by the plugin
+        my $is_binary;
+        my $system;
+        $fnret = OVH::Bastion::plugin_config(plugin => $osh_command, key => "execution_mode");
+        if ($fnret && $fnret->value) {
+            $system    = 1 if $fnret->value eq 'system';
+            $is_binary = 1 if $fnret->value eq 'binary';
         }
-        else {
-            # some plugins need to be called with system() instead of ::execute
-            my $is_binary;
-            my $system;
-            $fnret = OVH::Bastion::plugin_config(plugin => $osh_command, key => "execution_mode");
-            if ($fnret && $fnret->value) {
-                $system    = 1 if $fnret->value eq 'system';
-                $is_binary = 1 if $fnret->value eq 'binary';
-            }
-            $ENV{'OSH_IP_FROM'} = $ipfrom;    # used in some plugins for is_access_granted()
-            $fnret = OVH::Bastion::execute(
-                cmd           => \@cmd,
-                noisy_stdout  => 1,
-                noisy_stderr  => 1,
-                expects_stdin => 1,
-                system        => $system,
-                is_binary     => $is_binary,
-            );
-        }
+        $ENV{'OSH_IP_FROM'} = $ipfrom;    # used in some plugins for is_access_granted()
+        $fnret = OVH::Bastion::execute(
+            cmd           => \@cmd,
+            noisy_stdout  => 1,
+            noisy_stderr  => 1,
+            expects_stdin => 1,
+            system        => $system,
+            is_binary     => $is_binary,
+        );
         OVH::Bastion::set_terminal_mode_for_plugin(plugin => $osh_command, action => 'restore');
 
         if (defined $log_insert_id and defined $log_db_name) {
@@ -1309,7 +1303,13 @@ if ($JITMFARequired) {
         # use system() instead of OVH::Bastion::execute() because we need it to grab the term
         my $pamtries = 3;
         while (1) {
-            my $pamsysret = system('pamtester', 'sshd', $sysself, 'authenticate');
+            my $pamsysret;
+            if (OVH::Bastion::is_freebsd()) {
+                $pamsysret = system('sudo', '-n', '-u', 'root', '--', '/usr/bin/env', 'pamtester', 'sshd', $sysself, 'authenticate');
+            }
+            else {
+                $pamsysret = system('pamtester', 'sshd', $sysself, 'authenticate');
+            }
             if ($pamsysret < 0) {
                 main_exit(OVH::Bastion::EXIT_MFA_FAILED, 'mfa_failed', "MFA is required for this host, but this bastion is missing the `pamtester' tool, aborting");
             }
