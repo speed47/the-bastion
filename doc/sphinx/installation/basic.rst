@@ -7,13 +7,13 @@ If you are just upgrading from a previous version, please read :doc:`upgrading<u
 0. Got Puppet?
 ==============
 
-We published a Puppet module to handle The Bastion configuration and prerequisites. The GitHub repo is `here <https://github.com/ovh/puppet-thebastion>`_ and our module has been published to `the Puppet forge <https://forge.puppet.com/modules/goldenkiwi/thebastion>`_. Of course, its usage is completely optional, but if you choose to use it, some of the below steps will be done by Puppet. Hence, you might want to consider the steps in the following order:
+We published a Puppet module to handle The Bastion configuration and prerequisites. The GitHub repo is `here <https://github.com/ovh/puppet-thebastion>`_ and our module has been published to `the Puppet forge <https://forge.puppet.com/modules/goldenkiwi/thebastion>`_. Of course, its usage is completely optional, but if you choose to use it, some of the below steps will be done by Puppet. Hence, you might want to only consider the following steps:
 
-- :ref:`Operating system <install-basic_operating-system>`
+- :ref:`install-basic_operating-system`
 - :ref:`install-basic_get-the-code`
-- :ref:`Encrypt /home <install-basic_encrypt-home>`
+- :ref:`install-basic_encrypt-home`
 - (Run Puppet)
-- :ref:`Manually create our first bastion account <install-basic_first-account>`
+- :ref:`install-basic_first-account`
 
 .. _install-basic_operating-system:
 
@@ -57,7 +57,7 @@ Great care has been taken to write secure, tested code, but of course this is wo
 The bastion code usually lives under ``/opt/bastion``.
 You can either use ``git clone`` directly, or get the tarball of the latest release.
 
-- Using git:
+- Using :command:`git`:
 
 .. code-block:: shell
 
