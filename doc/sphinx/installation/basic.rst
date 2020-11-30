@@ -29,16 +29,16 @@ The following Linux distros are tested with each release, but as this is a secur
 - Ubuntu LTS 20.04, 18.04, 16.04, 14.04*
 - OpenSUSE Leap 15.2*, 15.1*, 15.0*
 
-\*: Note that these versions have no MFA support.
+*: Note that these versions have no out-of-the-box MFA support, as they lack packaged versions of `pamtester`, `pam-google-authenticator`, or both. Of course, you may compile those yourself.
+Any other so-called "modern" Linux version are not tested with each release, but should work with no or minor adjustments.
 
-If you're unsure or don't care, Debian is advised, as this is what we use in production at OVHcloud, hence is the most field-tested.
-Any other so-called "modern" Linux distro should work with no or minor adjustments.
+The following OS are also tested with each release:
 
-The code is also known to work correctly under:
+- FreeBSD/HardenedBSD 12.1**
 
-- FreeBSD 10+ / HardenedBSD [no MFA support]
+**: Note that these have partial MFA support, due to their reduced set of available `pam` plugins. Support for either an additional password or TOTP factor can be configured, but not both at the same time. The code is actu↪ally known to work on FreeBSD/HardenedBSD 10+, but it's only regularly tested under 12.1.
 
-Other BSD variants partially work, but are unsupported and discouraged as they have a severe limitation over the maximum number of supplementary groups (causing problems for group membership and restricted commands checks), no filesystem-level ACL support and missing MFA:
+Other BSD variants partially work but are unsupported and discouraged as they have a severe limitation over the maximum number of supplementary groups (causing problems for group membership and restricted commands checks),↪ no filesystem-level ACL support and missing MFA:
 
 - OpenBSD 5.4+
 - NetBSD 7+
