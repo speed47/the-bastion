@@ -10,10 +10,10 @@ If you are just upgrading from a previous version, please read :doc:`upgrading<u
 We published a Puppet module to handle The Bastion configuration and prerequisites. The GitHub repo is `here <https://github.com/ovh/puppet-thebastion>`_ and our module has been published to `the Puppet forge <https://forge.puppet.com/modules/goldenkiwi/thebastion>`_. Of course, its usage is completely optional, but if you choose to use it, some of the below steps will be done by Puppet. Hence, you might want to consider the steps in the following order:
 
 - :ref:`Operating system <install-basic_operating-system>`
-- :ref:`<install-basic_get-the-code>`
-- Encrypt /home
+- :ref:`install-basic_get-the-code`
+- :ref:`Encrypt /home <install-basic_encrypt-home>`
 - (Run Puppet)
-- Manually create our first bastion account
+- :ref:`Manually create our first bastion account <install-basic_first-account>`
 
 .. _install-basic_operating-system:
 
@@ -28,17 +28,17 @@ The following Linux distros are tested with each release, but as this is a secur
 
 - Debian 10 (Buster), 9 (Stretch), 8 (Jessie)
 - RHEL/CentOS 8, 7
-- Ubuntu LTS 20.04, 18.04, 16.04, 14.04*
-- OpenSUSE Leap 15.2*, 15.1*, 15.0*
+- Ubuntu LTS 20.04, 18.04, 16.04, 14.04\*
+- OpenSUSE Leap 15.2\*, 15.1\*, 15.0\*
 
-*: Note that these versions have no out-of-the-box MFA support, as they lack packaged versions of ``pamtester``, ``pam-google-authenticator``, or both. Of course, you may compile those yourself.
+\*: Note that these versions have no out-of-the-box MFA support, as they lack packaged versions of ``pamtester``, ``pam-google-authenticator``, or both. Of course, you may compile those yourself.
 Any other so-called `modern` Linux version are not tested with each release, but should work with no or minor adjustments.
 
 The following OS are also tested with each release:
 
-- FreeBSD/HardenedBSD 12.1**
+- FreeBSD/HardenedBSD 12.1\*\*
 
-**: Note that these have partial MFA support, due to their reduced set of available ``pam`` plugins. Support for either an additional password or TOTP factor can be configured, but not both at the same time. The code is actually known to work on FreeBSD/HardenedBSD 10+, but it's only regularly tested under 12.1.
+\*\*: Note that these have partial MFA support, due to their reduced set of available ``pam`` plugins. Support for either an additional password or TOTP factor can be configured, but not both at the same time. The code is actually known to work on FreeBSD/HardenedBSD 10+, but it's only regularly tested under 12.1.
 
 Other BSD variants partially work but are unsupported and discouraged as they have a severe limitation over the maximum number of supplementary groups (causing problems for group membership and restricted commands checks), no filesystem-level ACL support and missing MFA:
 
