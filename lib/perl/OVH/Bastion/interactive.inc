@@ -149,6 +149,13 @@ EOM
                             next;
                         }
                     }
+                    elsif ($_ eq '<COMMAND>') {
+                        my $fnret = OVH::Bastion::get_plugin_list();
+                        if ($fnret) {
+                            push @autocomplete, sort keys %{$fnret->value()};
+                            next;
+                        }
+                    }
                     push @autocomplete, $_;
                 }
                 return @autocomplete;
@@ -182,7 +189,7 @@ EOM
     while (defined(my $line = $term->readline($prompt))) {
         alarm(0);      # disable timeout
         $line =~ s/^\s+|\s+$//g;
-        next if (length($line) == 0);    # ignore empty lines
+        next if (length($line) == 0);                                    # ignore empty lines
         last if ($line eq 'exit' or $line eq 'quit' or $line eq 'q');    # break out of loop if asked
 
         $term->addhistory($line);

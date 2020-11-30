@@ -214,7 +214,11 @@ fi
 
 if [ "$OS_FAMILY" = FreeBSD ]; then
     action_doing "Running under FreeBSD, verifying if /home is mounted with ACLs..."
-    home_mp="$(df /home | awk '{ if(NR==2) {print $6;exit} }')"
+    home_mp="$(df /home 2>/dev/null | awk '{ if(NR==2) {print $6;exit} }')"
+    if [ -z "$home_mp" ]; then
+        # no /home? nevermind, / will probably do
+        home_mp=/
+    fi
     if ! mount | awk '{ if($3=="'"$home_mp"'"){print;exit} }' | grep -q -w acls; then
         action_error "No. Please modify your /etc/fstab accordingly, and run \`mount -u -o acls $home_mp' to apply the change on-the-fly."
         exit 1
@@ -641,14 +645,14 @@ if [ "$nothing" = 0 ]; then
     fi
 
     # fix bad authorized_keys2 contents created in some cases before v2.30.00
-    action_doing "Fixing potential buggy keys in authorized_keys2 contents"
+    action_doing "Fixing potential buggy keys in $AK_FILE contents"
     at_least_one_changed=0
     for account in $(getent passwd | grep ":$basedir/bin/shell/osh.pl$" | cut -d: -f1); do
-        test -f "/home/$account/.ssh/authorized_keys2" || continue
-        grep -Eq '^from="[^ ]+"(ssh-|ecdsa-)' "/home/$account/.ssh/authorized_keys2" || continue
+        test -f "/home/$account/$AK_FILE" || continue
+        grep -Eq '^from="[^ ]+"(ssh-|ecdsa-)' "/home/$account/$AK_FILE" || continue
         at_least_one_changed=1
         action_detail "... $account"
-        sed_compat 's/^(from="[^ ]+")(ssh-|ecdsa-)/\1 \2/g' "/home/$account/.ssh/authorized_keys2"
+        sed_compat 's/^(from="[^ ]+")(ssh-|ecdsa-)/\1 \2/g' "/home/$account/$AK_FILE"
     done
     if [ "$at_least_one_changed" = 1 ]; then
         action_done

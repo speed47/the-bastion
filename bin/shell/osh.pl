@@ -111,7 +111,7 @@ my $osh_debug   = $config->{'debug'};
 # and the real remote account name (which doesn't have an account here because it's from another realm)
 # is passed through LC_BASTION
 if ($self =~ /^realm_([a-zA-Z0-9_.-]+)/) {
-    $self = sprintf("%s/%s", $1, $ENV{'LC_BASTION'});
+    $self  = sprintf("%s/%s", $1, $ENV{'LC_BASTION'});
     $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $self, realmOnly => 1);
     $fnret or main_exit(OVH::Bastion::EXIT_ACCOUNT_INVALID, "account_invalid", "The realm-scoped account '$self' is invalid (" . $fnret->msg . ")");
 }
@@ -203,7 +203,7 @@ my $lastlog_filepath = $fnret->value->{'filepath'};
 my $lastlogmsg = sprintf("Welcome to $bastionName, $self, this is your first connection");
 if ($fnret && $fnret->value && $fnret->value->{'seconds'}) {
     my $lastloginfo = $fnret->value->{'info'} ? " from " . $fnret->value->{'info'} : "";
-    $fnret = OVH::Bastion::duration2human(seconds => $fnret->value->{'seconds'}, tense => "past");
+    $fnret      = OVH::Bastion::duration2human(seconds => $fnret->value->{'seconds'}, tense => "past");
     $lastlogmsg = sprintf("Welcome to $bastionName, $self, your last login was %s ago (%s)%s", $fnret->value->{'duration'}, $fnret->value->{'date'}, $lastloginfo);
 }
 
@@ -230,10 +230,9 @@ my $result = GetOptions(
     "c=s"   => \$realOptions,    # user command under -c '...'
     "debug" => \$opt_debug,
 );
-
-if (not $result or not $realOptions) {
+if (not $result) {
     help();
-    main_exit OVH::Bastion::EXIT_UNKNOWN_COMMAND, "unknown_command", "Bad or empty command";
+    main_exit OVH::Bastion::EXIT_UNKNOWN_COMMAND, "unknown_command", "Bad command";
 }
 
 $osh_debug = 1 if $opt_debug;    # osh_debug was already 1 if specified in config file
@@ -258,7 +257,7 @@ my @toExecute;
 
 # special case: mosh, in that case we have something like this in $realOptions
 # mosh-server 'new' '-s' '-c' '256' '-l' 'LANG=en_US.UTF-8' '-l' 'LANGUAGE=en_US' '--' '--osh' 'info'
-if ($realOptions =~ /^mosh-server (.+?) '--' (.*)/) {
+if (defined $realOptions && $realOptions =~ /^mosh-server (.+?) '--' (.*)/) {
     osh_debug("MOSH DETECTED (with params)");
 
     # remove mosh stuff and save it for later
@@ -294,7 +293,7 @@ if ($realOptions =~ /^mosh-server (.+?) '--' (.*)/) {
         main_exit OVH::Bastion::EXIT_MOSH_DISABLED, "mosh_disabled", "Mosh support has been disabled on this bastion";
     }
 }
-elsif ($realOptions =~ /^mosh-server /) {
+elsif (defined $realOptions && $realOptions =~ /^mosh-server /) {
     osh_debug("MOSH DETECTED (without any param)");
 
     # we won't really use mosh, as we'll exit later with the bastion help anyway
@@ -307,7 +306,7 @@ elsif ($realOptions =~ /^mosh-server /) {
 my $beforeOptions;
 my $afterOptions;
 
-if ($realOptions =~ /^(.*?) -- (.*)$/) {
+if (defined $realOptions && $realOptions =~ /^(.*?) -- (.*)$/) {
     $beforeOptions = $1;
     $afterOptions  = $2;
     osh_debug("before <$beforeOptions> after <$afterOptions>");
@@ -362,6 +361,18 @@ my $remainingOptions;
     "use-key=s"       => \my $useKey,
     "kbd-interactive" => \my $userKbdInteractive,
 );
+if (not defined $realOptions) {
+    help();
+    if (OVH::Bastion::config('interactiveModeByDefault')->value) {
+
+        # nothing specified by the user, let's drop them to the interactive mode
+        osh_warn("No command specified, entering interactive mode by default");
+        $interactive = 1;
+    }
+    else {
+        main_exit OVH::Bastion::EXIT_UNKNOWN_COMMAND, "unknown_command", "Missing command";
+    }
+}
 
 if (!$quiet && $realm && !$ENV{'OSH_NO_INTERACTIVE'}) {
     my $welcome =
@@ -537,6 +548,15 @@ else {
     }
 }
 
+if ($user && !OVH::Bastion::is_valid_remote_user(user => $user)) {
+    main_exit OVH::Bastion::EXIT_INVALID_REMOTE_USER, 'invalid_remote_user', "Remote user name '$user' seems invalid";
+}
+if ($host && $host !~ m{^[a-zA-Z0-9._/:-]+$}) {
+
+    # can be an IP (v4 or v6), hostname, or prefix (with a /)
+    main_exit OVH::Bastion::EXIT_INVALID_REMOTE_HOST, 'invalid_remote_host', "Remote host name '$host' seems invalid";
+}
+
 # Get real ip from host
 $fnret = R('ERR_INTERNAL', silent => 1);
 my $ip = undef;
@@ -624,6 +644,7 @@ my $isMfaPasswordRequired   = OVH::Bastion::is_user_in_group(account => $sysself
 my $hasMfaPasswordBypass    = OVH::Bastion::is_user_in_group(account => $sysself, group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP);
 my $isMfaTOTPRequired       = OVH::Bastion::is_user_in_group(account => $sysself, group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP);
 my $hasMfaTOTPBypass        = OVH::Bastion::is_user_in_group(account => $sysself, group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP);
+
 if ($mfaPolicy ne 'disabled' && !grep { $osh_command eq $_ } qw{ selfMFASetupPassword selfMFASetupTOTP help info }) {
 
     if (($mfaPolicy eq 'password-required' && !$hasMfaPasswordBypass) || $isMfaPasswordRequired) {

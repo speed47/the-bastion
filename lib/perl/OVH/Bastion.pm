@@ -5,7 +5,7 @@ use common::sense;
 use Fcntl;
 use POSIX qw(strftime);
 
-our $VERSION = '3.00.02';
+our $VERSION = '3.01.00';
 
 BEGIN {
     # only used by the handler below
@@ -90,6 +90,8 @@ use constant {
     EXIT_MFA_ANY_SETUP_REQUIRED      => 124,
     EXIT_MFA_FAILED                  => 125,
     EXIT_TTYREC_CMDLINE_FAILED       => 126,
+    EXIT_INVALID_REMOTE_USER         => 127,
+    EXIT_INVALID_REMOTE_HOST         => 128,
 };
 
 use constant {
@@ -103,6 +105,10 @@ use constant {
 
     TOTP_FILENAME => '.otp',
     TOTP_BASEDIR  => '/var/otp',
+
+    # authorized_keys file, relative to the user's HOME directory.
+    # if you change this, also change it in lib/shell/functions.inc
+    AK_FILE => '.ssh/authorized_keys2',
 
     OPT_ACCOUNT_INGRESS_PIV_POLICY => 'ingress_piv_policy',
     OPT_ACCOUNT_INGRESS_PIV_GRACE  => 'ingress_piv_grace',
@@ -176,7 +182,7 @@ sub is_account_nonexpired {
     my $isFirstLogin;
     my $lastlog;
     my $filepath = "/home/$sysaccount/lastlog" . ($remoteaccount ? "_$remoteaccount" : "");
-    my $value = {filepath => $filepath};
+    my $value    = {filepath => $filepath};
     if (-e $filepath) {
         $isFirstLogin = 0;
         $lastlog      = (stat(_))[9];
@@ -228,7 +234,7 @@ sub is_account_nonexpired {
     if ($accountMaxInactiveDays == 0) {
 
         # no expiration configured, allow login and return some info
-        return R('OK_FIRST_LOGIN', value => $value) if $isFirstLogin;
+        return R('OK_FIRST_LOGIN',               value => $value) if $isFirstLogin;
         return R('OK_EXPIRATION_NOT_CONFIGURED', value => $value);
     }
     else {
@@ -358,8 +364,8 @@ sub osh_header {
     my $versionline = 'the-bastion-' . $VERSION;
     my $output      = '';
     $output .= colored('---' . $hostname . '-' x (80 - length($hostname) - length($versionline) - 6) . "$versionline---" . "\n", 'bold blue');
-    $output .= colored("=> $text\n",    "blue");
-    $output .= colored('-' x 80 . "\n", 'blue');
+    $output .= colored("=> $text\n",                                                                                             "blue");
+    $output .= colored('-' x 80 . "\n",                                                                                          'blue');
 
     print $output unless ($ENV{'PLUGIN_QUIET'});
     return;
@@ -855,10 +861,10 @@ sub build_ttyrec_cmdline {
     my $bastionName          = OVH::Bastion::config('bastionName')->value;
     my $ttyrecFilenameFormat = OVH::Bastion::config('ttyrecFilenameFormat')->value;
     $ttyrecFilenameFormat =~ s/&bastionname/$bastionName/g;
-    $ttyrecFilenameFormat =~ s/&uniqid/$params{'uniqid'}/g   if $params{'uniqid'};
-    $ttyrecFilenameFormat =~ s/&ip/$params{'ip'}/g           if $params{'ip'};
-    $ttyrecFilenameFormat =~ s/&port/$params{'port'}/g       if $params{'port'};
-    $ttyrecFilenameFormat =~ s/&user/$params{'user'}/g       if $params{'user'};
+    $ttyrecFilenameFormat =~ s/&uniqid/$params{'uniqid'}/g if $params{'uniqid'};
+    $ttyrecFilenameFormat =~ s/&ip/$params{'ip'}/g if $params{'ip'};
+    $ttyrecFilenameFormat =~ s/&port/$params{'port'}/g if $params{'port'};
+    $ttyrecFilenameFormat =~ s/&user/$params{'user'}/g if $params{'user'};
     $ttyrecFilenameFormat =~ s/&account/$params{'account'}/g if $params{'account'};
 
     if ($ttyrecFilenameFormat =~ /&(bastionname|uniqid|ip|port|user|account)/) {

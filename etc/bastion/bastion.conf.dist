@@ -219,10 +219,10 @@
 # DEFAULT: 90
 "MFAPasswordMaxDays": 90,
 #
-# MFAPasswordMaxDays (int >= 0)
+# MFAPasswordWarnDays (int >= 0)
 #    DESC: For the PAM UNIX password MFA, sets the number of days before expiration on which the user will be warned to change his password (see `chage -W')
 # DEFAULT: 15
-"MFAPasswordMaxDays": 15,
+"MFAPasswordWarnDays": 15,
 #
 # MFAPasswordInactiveDays (int >= -1)
 #    DESC: For the PAM UNIX password MFA, the account will be blocked after the password is expired (and not renewed) for this amount of days (see `chage -E'). -1 disables this feature. Note that this is different from the accountMaxInactiveDays option above, that is handled by the bastion software itself instead of PAM
@@ -256,6 +256,11 @@
 #     DESC: The number of idle seconds after which the user is disconnected from the bastion when in interactive mode. A value of 0 will disable this feature (user will never be disconnected for idle timeout)
 #  DEFAULT: 60
 "interactiveModeTimeout": 60,
+#
+# interactiveModeByDefault (boolean-int)
+#     DESC: If true (1), drops the user to interactive mode if nothing is specified on the command line. If false (0), displays the help and exits with an error. Note that for `true' to have the expected effect, interactive mode must be enabled (see the `ìnteractiveModeAllowed' option above).
+#  DEFAULT: 1
+"interactiveModeByDefault": 1,
 #
 # enableSyslog (boolean-int)
 #     DESC: If set to 0, syslog will be disabled. If set to 1, we'll send logs through syslog (don't forget to setup your syslogd)
