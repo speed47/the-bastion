@@ -9,11 +9,11 @@ If you are just upgrading from a previous version, please read :doc:`upgrading<u
 
 We published a Puppet module to handle The Bastion configuration and prerequisites. The GitHub repo is `here <https://github.com/ovh/puppet-thebastion>`_ and our module has been published to `the Puppet forge <https://forge.puppet.com/modules/goldenkiwi/thebastion>`_. Of course, its usage is completely optional, but if you choose to use it, some of the below steps will be done by Puppet. Hence, you might want to consider the steps in the following order:
 
-- 1. Operating system
-- 2. Get the code
-- 4. Encrypt /home
-- Run Puppet
-- 8. Manually create our first bastion account
+- Operating system
+- Get the code
+- Encrypt /home
+- (Run Puppet)
+- Manually create our first bastion account
 
 1. Operating system
 ===================
