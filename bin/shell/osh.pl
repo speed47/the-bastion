@@ -7,6 +7,7 @@ use File::Basename;
 use lib dirname(__FILE__) . '/../../lib/perl';
 use OVH::Result;
 use OVH::Bastion;
+use OVH::Bastion::Account;
 
 use Getopt::Long qw(GetOptionsFromString :config pass_through no_ignore_case no_auto_abbrev);
 use Sys::Hostname;
@@ -31,9 +32,12 @@ $SIG{$_} = \&exit_sig for qw{ INT TERM SEGV HUP PIPE };
 umask(0027);
 
 # sanitize user for taint mode
-my $self = OVH::Bastion::get_user_from_env()->value;
-my $home = OVH::Bastion::get_home_from_env()->value;
-my ($sysself, $realm, $remoteself);    # to handle realm cases, will be filled later, look for # REALM below
+#my $self = OVH::Bastion::get_user_from_env()->value;
+#my $home = OVH::Bastion::get_home_from_env()->value;
+#my ($Self->sysName, $realm, $remoteself);    # to handle realm cases, will be filled later, look for # REALM below
+
+# $Self can be an invalid OVH::Result! It's checked after we define main_exit()
+my $Self = OVH::Bastion::Account->newFromEnv();
 
 # both needs to be there because in case of SIG, we need them in the handler
 my $log_db_name   = undef;
@@ -41,7 +45,7 @@ my $log_insert_id = undef;
 
 # set a uniqid that will be used in syslog, both sqls, and ttyrec name, so we can search for the same event
 my $log_uniq_id = OVH::Bastion::generate_uniq_id()->value;
-$ENV{'UNIQID'} = $log_uniq_id;         # some modules need it, also used in warn/die handler
+$ENV{'UNIQID'} = $log_uniq_id;    # some modules need it, also used in warn/die handler
 
 # fetch basic connection info
 my ($ipfrom, $portfrom, $bastionip, $bastionport) = split(/\s/, $ENV{'SSH_CONNECTION'});
@@ -54,7 +58,7 @@ sub main_exit {
 
     # if, this is an early exit, we didn't log anything yet in the sql, do it now
     OVH::Bastion::log_access_insert(
-        account     => $self,
+        account     => $Self->name,
         cmdtype     => 'abort',
         allowed     => undef,
         ipfrom      => $ipfrom,
@@ -83,11 +87,15 @@ sub main_exit {
 
 # Safeness check
 
-if (not defined $self) {
+if (!$Self) {
+    # $Self is in fact an OVH::Result from the failed newFromEnv() above
+    $fnret = $Self;
+    warn_syslog("An invalid account attempted to use the bastion (" . $fnret->msg . ")");
 
-    # wow, that's weird, stop here
-    $self = '<none>';
-    main_exit(OVH::Bastion::EXIT_EXEC_FAILED, "security_violation", "USER is not defined");
+    # we ensure $Self is now an OVH::Bastion::Account, albeit an invalid one,
+    # so that its ->name() is callable, mainly by the main_exit() func
+    $Self = OVH::Bastion::Account->newInvalid();
+    main_exit(OVH::Bastion::EXIT_ACCOUNT_INVALID, "account_invalid", "The account is invalid (" . $fnret->msg . ")");
 }
 
 #
@@ -104,6 +112,9 @@ my $osh_debug   = $config->{'debug'};
 # REALM case: somebody from another realm (named xyz) connects with the realm_xyz account here,
 # and the real remote account name (which doesn't have an account here because it's from another realm)
 # is passed through LC_BASTION
+# FIXME move this logic to newFromName()
+
+=cut
 if ($self =~ /^realm_([a-zA-Z0-9_.-]+)/) {
     if ($ENV{'LC_BASTION'}) {
 
@@ -124,28 +135,27 @@ if ($self =~ /^realm_([a-zA-Z0-9_.-]+)/) {
     }
 }
 else {
-    # non-realm case
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $self);
-    $fnret
-      or
-      main_exit(OVH::Bastion::EXIT_ACCOUNT_INVALID, "account_invalid", "The account is invalid (" . $fnret->msg . ")");
+=cut
+
+# non-realm case
+$fnret = $Self->isExisting();
+if (!$fnret) {
+    main_exit(OVH::Bastion::EXIT_ACCOUNT_INVALID, "account_invalid", "The account is invalid (" . $fnret->msg . ")");
 }
-{
-    my %values = %{$fnret->value};
-    ($sysself, $self, $realm, $remoteself) = @values{qw{ sysaccount account realm remoteaccount }};
-}
+#}
 
 #
 # First Check : is USER valid ?
 #
 my $activenessDenyOnFailure = OVH::Bastion::config("accountExternalValidationDenyOnFailure")->value;
 my $msg_to_print_delayed;   # if set, will be osh_warn()'ed if we're connecting through ssh (i.e. not scp, it breaks it)
-$fnret = OVH::Bastion::is_account_active(account => $self);
+$fnret = $Self->isActive();
 if ($fnret) {
     ;                       # OK
 }
 elsif ($fnret->is_ko || ($activenessDenyOnFailure && $fnret->is_err)) {
-    main_exit OVH::Bastion::EXIT_ACCOUNT_INACTIVE, "account_inactive", "Your account is inactive, $self, sorry";
+    main_exit OVH::Bastion::EXIT_ACCOUNT_INACTIVE, "account_inactive",
+      "Your account is inactive, " . $Self->name . ", sorry";
 }
 else {
     $msg_to_print_delayed = $fnret->msg;
@@ -175,7 +185,7 @@ if (-e '/home/allowkeeper/maintenance') {
 # Does the user have a TTL, and if yes, has it expired?
 #
 
-$fnret = OVH::Bastion::is_account_ttl_nonexpired(account => $self, sysaccount => $sysself);
+$fnret = OVH::Bastion::is_account_ttl_nonexpired(account => $Self->name, sysaccount => $Self->sysName);    # TODO
 if (!$fnret) {
     main_exit(OVH::Bastion::EXIT_TTL_EXPIRED, "ttl_expired", $fnret->msg);
 }
@@ -183,7 +193,7 @@ if (!$fnret) {
 #
 # Second check : has account logged-in recently enough to be allowed ?
 #
-$fnret = OVH::Bastion::is_account_nonexpired(sysaccount => $sysself, remoteaccount => $remoteself);
+$fnret = OVH::Bastion::is_account_nonexpired(sysaccount => $Self->sysName, remoteaccount => $Self->remoteName);   # TODO
 if ($fnret->is_err) {
 
     # internal error, warn and pass
@@ -196,12 +206,13 @@ elsif ($fnret->is_ko) {
 }
 my $lastlog_filepath = $fnret->value->{'filepath'};
 
-my $lastlogmsg = sprintf("Welcome to $bastionName, $self, this is your first connection");
+my $lastlogmsg = sprintf("Welcome to %s, %s, this is your first connection", $bastionName, $Self->name);
 if ($fnret && $fnret->value && $fnret->value->{'seconds'}) {
     my $lastloginfo = $fnret->value->{'info'} ? " from " . $fnret->value->{'info'} : "";
     $fnret      = OVH::Bastion::duration2human(seconds => $fnret->value->{'seconds'}, tense => "past");
     $lastlogmsg = sprintf(
-        "Welcome to $bastionName, $self, your last login was %s ago (%s)%s",
+        "Welcome to %s, %s, your last login was %s ago (%s)%s",
+        $bastionName, $Self->name,
         $fnret->value->{'duration'},
         $fnret->value->{'date'}, $lastloginfo
     );
@@ -238,14 +249,19 @@ if (not $result) {
 $osh_debug = 1 if $opt_debug;    # osh_debug was already 1 if specified in config file
 
 # per-user debug ?
-$fnret = OVH::Bastion::account_config(account => $self, key => "debug");
+$fnret = OVH::Bastion::account_config(account => $Self->name, key => "debug");
 if ($fnret and $fnret->value() =~ /yes/) {
     $osh_debug = 1;
 }
 
 $ENV{'OSH_DEBUG'} = 1 if $osh_debug;
 
-osh_debug("self=$self home=$home realm=$realm remoteself=$remoteself sysself=$sysself");
+osh_debug(
+    sprintf(
+        "self=%s home=%s realm=%s remoteself=%s sysself=%s",
+        $Self->name, $Self->home, $Self->realm, $Self->remoteName, $Self->sysName
+    )
+);
 osh_debug("user-passed options : $realOptions");
 
 #
@@ -376,14 +392,14 @@ if (not defined $realOptions) {
     }
 }
 
-if (!$quiet && $realm && !$ENV{'OSH_IN_INTERACTIVE_SESSION'}) {
+if (!$quiet && $Self->realm && !$ENV{'OSH_IN_INTERACTIVE_SESSION'}) {
     my $welcome =
         "You are now connected to "
       . colored($bastionName, "yellow")
       . ". Welcome, "
-      . colored($remoteself, "yellow")
+      . colored($Self->remoteName, "yellow")
       . ", citizen of the "
-      . colored($realm, "yellow")
+      . colored($Self->realm, "yellow")
       . " realm!";
     print colored("-" x (length($welcome) - 3 * 9) . "\n", "bold yellow");
     print $welcome. "\n";
@@ -452,8 +468,8 @@ if ($bind) {
 # if proactive MFA has been requested, do it here, before the code diverts to either
 # handling interactive session, plugins/osh commands, or a connection request
 if ($proactiveMfa) {
-    print "As proactive MFA has been requested, entering MFA phase for $self.\n";
-    $fnret = OVH::Bastion::do_pamtester(self => $self, sysself => $sysself);
+    print "As proactive MFA has been requested, entering MFA phase for " . $Self->name . "\n";
+    $fnret = OVH::Bastion::do_pamtester(self => $Self->name, sysself => $Self->sysName);
     $fnret or main_exit(OVH::Bastion::EXIT_MFA_FAILED, 'mfa_failed', $fnret->msg);
 
     # if we're still here, it succeeded
@@ -477,7 +493,7 @@ if ($interactive and not $ENV{'OSH_IN_INTERACTIVE_SESSION'}) {
     }
 
     my $logret = OVH::Bastion::log_access_insert(
-        account     => $self,
+        account     => $Self->name,
         cmdtype     => 'interactive',
         allowed     => 1,
         ipfrom      => $ipfrom,
@@ -505,13 +521,13 @@ if ($interactive and not $ENV{'OSH_IN_INTERACTIVE_SESSION'}) {
         osh_warn($logret->msg);
     }
 
-    OVH::Bastion::interactive(realOptions => $realOptions, timeoutHandler => \&exit_sig, self => $self);
+    OVH::Bastion::interactive(realOptions => $realOptions, timeoutHandler => \&exit_sig, self => $Self->name);
 
     # this functions may never return, especially in case of idle timeout exit
 
     if (defined $log_insert_id and defined $log_db_name) {
         $logret = OVH::Bastion::log_access_update(
-            account       => $self,
+            account       => $Self->name,
             insert_id     => $log_insert_id,
             db_name       => $log_db_name,
             uniq_id       => $log_uniq_id,
@@ -644,7 +660,7 @@ elsif ($passwordFile) {
     $userPasswordContext = 'group';
 }
 elsif ($selfPassword) {
-    $userPasswordClue    = $self;
+    $userPasswordClue    = $Self->name;
     $userPasswordContext = 'self';
 }
 
@@ -675,17 +691,17 @@ $ENV{'OSH_KBD_INTERACTIVE'} = 1 if $userKbdInteractive; # useful for plugins tha
 # MFA enforcing for ingress connection, either on global bastion config, or on specific account config
 my $mfaPolicy = OVH::Bastion::config('accountMFAPolicy')->value;
 my $isMfaPasswordConfigured =
-  OVH::Bastion::is_user_in_group(account => $sysself, group => OVH::Bastion::MFA_PASSWORD_CONFIGURED_GROUP);
+  OVH::Bastion::is_user_in_group(account => $Self->sysName, group => OVH::Bastion::MFA_PASSWORD_CONFIGURED_GROUP);
 my $isMfaTOTPConfigured =
-  OVH::Bastion::is_user_in_group(account => $sysself, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP);
+  OVH::Bastion::is_user_in_group(account => $Self->sysName, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP);
 my $isMfaPasswordRequired =
-  OVH::Bastion::is_user_in_group(account => $sysself, group => OVH::Bastion::MFA_PASSWORD_REQUIRED_GROUP);
+  OVH::Bastion::is_user_in_group(account => $Self->sysName, group => OVH::Bastion::MFA_PASSWORD_REQUIRED_GROUP);
 my $hasMfaPasswordBypass =
-  OVH::Bastion::is_user_in_group(account => $sysself, group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP);
+  OVH::Bastion::is_user_in_group(account => $Self->sysName, group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP);
 my $isMfaTOTPRequired =
-  OVH::Bastion::is_user_in_group(account => $sysself, group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP);
+  OVH::Bastion::is_user_in_group(account => $Self->sysName, group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP);
 my $hasMfaTOTPBypass =
-  OVH::Bastion::is_user_in_group(account => $sysself, group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP);
+  OVH::Bastion::is_user_in_group(account => $Self->sysName, group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP);
 
 # MFA information from a potential ingress realm:
 my $remoteMfaValidated = 0;
@@ -693,11 +709,11 @@ my $remoteMfaPassword  = 0;
 my $remoteMfaTOTP      = 0;
 my $remoteHasPIV       = 0;
 
-my $pivEffectivePolicyEnabled = OVH::Bastion::is_effective_piv_account_policy_enabled(account => $self);
+my $pivEffectivePolicyEnabled = OVH::Bastion::is_effective_piv_account_policy_enabled(account => $Self->name);
 
 # if we're coming from a realm, we're receiving a connection from another bastion, keep all the traces:
 my @previous_bastion_details;
-if ($realm && $ENV{'LC_BASTION_DETAILS'}) {
+if ($Self->realm && $ENV{'LC_BASTION_DETAILS'}) {
     my $decoded_details;
     eval { $decoded_details = decode_json($ENV{'LC_BASTION_DETAILS'}); };
     if (!$@) {
@@ -717,7 +733,9 @@ if ($realm && $ENV{'LC_BASTION_DETAILS'}) {
             if ($pivEffectivePolicyEnabled && !$remoteHasPIV) {
                 my $otherSideName = $decoded_details->[0]{'via'}{'name'} || $decoded_details->[0]{'via'}{'host'};
                 main_exit(OVH::Bastion::EXIT_PIV_REQUIRED, 'piv_required',
-                    "Sorry $self, but the $bastionName bastion policy requires that you use a PIV key to connect, please set a PIV key up on your local bastion ($otherSideName)."
+                        "Sorry "
+                      . $Self->name
+                      . ", but the $bastionName bastion policy requires that you use a PIV key to connect, please set a PIV key up on your local bastion ($otherSideName)."
                 );
             }
         }
@@ -752,7 +770,7 @@ if ($mfaPolicy ne 'disabled' && !grep { $osh_command eq $_ } qw{ selfMFASetupPas
 # /MFA enforcing
 
 osh_debug("self     : "
-      . (defined $self ? $self : '<undef>') . "\n"
+      . (defined $Self->name ? $Self->name : '<undef>') . "\n"
       . "user       : "
       . (defined $user ? $user : '<undef>') . "\n"
       . "host       : "
@@ -773,9 +791,9 @@ my $hostto = OVH::Bastion::ip2host($host)->value || $host;
 
 # Special case: adminSudo for ssh connection as another user
 if ($sshAs) {
-    $fnret = OVH::Bastion::is_admin(account => $self);
+    $fnret = OVH::Bastion::is_admin(account => $Self->name);
     my $logret = OVH::Bastion::log_access_insert(
-        account     => $self,
+        account     => $Self->name,
         cmdtype     => 'sshas',
         allowed     => $fnret ? 1 : 0,
         ipfrom      => $ipfrom,
@@ -802,7 +820,8 @@ if ($sshAs) {
           "Can't use --ssh-as and --osh together. If you want to run a plugin as another user, use --osh adminSudo";
     }
     $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $sshAs);
-    $fnret or main_exit OVH::Bastion::EXIT_ACCESS_DENIED, 'invalid_account', "Sorry, the specified account is invalid";
+    $fnret
+      or main_exit OVH::Bastion::EXIT_ACCESS_DENIED, 'invalid_account', "Sorry, the specified account is invalid";
 
     my @cmd = qw( sudo -n -u );
     push @cmd, $sshAs;
@@ -827,14 +846,14 @@ if ($sshAs) {
         type      => 'security',
         fields    => [
             ['type', 'admin-ssh-as'],
-            ['account' => $self],
+            ['account' => $Self->name],
             ['sudo-as', $sshAs],
             ['plugin',  'ssh'],
             ['params', join(" ", @forwardOptions)]
         ]
     );
 
-    osh_warn("ADMIN SUDO: $self, you'll now impersonate $sshAs, this has been logged.");
+    osh_warn("ADMIN SUDO: " . $Self->name . ", you'll now impersonate $sshAs, this has been logged.");
 
     exec(@cmd)
       or main_exit(OVH::Bastion::EXIT_EXEC_FAILED,
@@ -881,10 +900,10 @@ if ($osh_command) {
     $osh_command = $legacy2new{$osh_command} if $legacy2new{$osh_command};
 
     # Then test for rights
-    $fnret = OVH::Bastion::can_account_execute_plugin(account => $self, plugin => $osh_command);
+    $fnret = OVH::Bastion::can_account_execute_plugin(account => $Self->name, plugin => $osh_command);
 
     my $logret = OVH::Bastion::log_access_insert(
-        account     => $self,
+        account     => $Self->name,
         cmdtype     => 'osh',
         allowed     => ($fnret ? 1 : 0),
         ipfrom      => $ipfrom,
@@ -1003,12 +1022,12 @@ if ($osh_command) {
 
         # and start the MFA phase if needed
         if ($MFArequiredForPlugin ne 'none' && !$skipMFA) {
-            print "As this is required to run this plugin, entering MFA phase for $self.\n";
+            print "As this is required to run this plugin, entering MFA phase for " . $Self->name . "\n";
             if ($ENV{'OSH_PROACTIVE_MFA'}) {
                 print "... you already validated MFA proactively.\n";
             }
             else {
-                $fnret = OVH::Bastion::do_pamtester(self => $self, sysself => $sysself);
+                $fnret = OVH::Bastion::do_pamtester(self => $Self->name, sysself => $Self->sysName);
                 $fnret or main_exit(OVH::Bastion::EXIT_MFA_FAILED, 'mfa_failed', $fnret->msg);
             }
 
@@ -1049,7 +1068,7 @@ if ($osh_command) {
 
         if (defined $log_insert_id and defined $log_db_name) {
             $logret = OVH::Bastion::log_access_update(
-                account       => $self,
+                account       => $Self->name,
                 insert_id     => $log_insert_id,
                 db_name       => $log_db_name,
                 uniq_id       => $log_uniq_id,
@@ -1085,25 +1104,25 @@ if (!$quiet) {
 
 # if no user yet, fix it to remote user
 # do that here, cause sometimes we do not want to pass user to osh
-$user = $user || $config->{'defaultLogin'} || $remoteself || $sysself;
+$user = $user || $config->{'defaultLogin'} || $Self->remoteName || $Self->sysName;
 
 # log request
 osh_debug("final request : " . "$user\@$ip -p $port -- $command'\n");
 
-my $displayLine = "$hostfrom:$portfrom => $self\@$bastionhost:$bastionport => $user\@$hostto:$port";
+my $displayLine = "$hostfrom:$portfrom => " . $Self->name . "\@$bastionhost:$bastionport => $user\@$hostto:$port";
 
 if (!$quiet) {
     print "$displayLine ...\n";
 }
 
 # before doing stuff, check if we have the right to connect somewhere (some users are locked only to osh commands)
-$fnret = OVH::Bastion::account_config(account => $self, key => OVH::Bastion::OPT_ACCOUNT_OSH_ONLY);
+$fnret = OVH::Bastion::account_config(account => $Self->name, key => OVH::Bastion::OPT_ACCOUNT_OSH_ONLY);
 if ($fnret and $fnret->value() =~ /yes/) {
     $fnret = R('KO_ACCESS_DENIED', msg => "You don't have the right to connect anywhere");
 }
 else {
     $fnret = OVH::Bastion::is_access_granted(
-        account => $self,
+        account => $Self->name,
         user    => $user,
         ipfrom  => $ipfrom,
         ip      => $ip,
@@ -1118,12 +1137,12 @@ if (!$fnret) {
 
     #   User is not allowed, exit
     my $message = $fnret->msg;
-    if ($user eq $self) {
+    if ($user eq $Self->name) {
         $message .= " (tried with remote user '$user')";    # "root is not the default login anymore"
     }
 
     my $logret = OVH::Bastion::log_access_insert(
-        account     => $self,
+        account     => $Self->name,
         cmdtype     => $telnet ? 'telnet' : 'ssh',
         allowed     => 0,
         ipfrom      => $ipfrom,
@@ -1160,11 +1179,11 @@ my $ttyrec_fnret = OVH::Bastion::build_ttyrec_cmdline_part1of2(
     ip            => $ip,
     port          => $port,
     user          => $user,
-    account       => $self,
+    account       => $Self->name,
     uniqid        => $log_uniq_id,
-    home          => $home,
-    realm         => $realm,
-    remoteaccount => $remoteself,
+    home          => $Self->home,
+    realm         => $Self->realm,
+    remoteaccount => $Self->remoteName,
     debug         => $osh_debug,
     tty           => $tty,
     notty         => $notty
@@ -1190,7 +1209,7 @@ if ($userPasswordClue) {
     $fnret = OVH::Bastion::get_passfile(
         hint      => $userPasswordClue,
         context   => $userPasswordContext,
-        self      => ($remoteself || $sysself),
+        self      => ($Self->remoteName || $Self->sysName),
         tryLegacy => 1
     );
     if (!$fnret) {
@@ -1380,7 +1399,8 @@ else {
                         $type, $keyinfo->{'family'}, $keyinfo->{'size'}, $keyinfo->{'fingerprint'},
                         $generated, $forced
                     ) unless $quiet;
-                    push @keysToTry, $keyinfo->{'fullpath'} if not(grep { $_ eq $keyinfo->{'fullpath'} } @keysToTry);
+                    push @keysToTry, $keyinfo->{'fullpath'}
+                      if not(grep { $_ eq $keyinfo->{'fullpath'} } @keysToTry);
                 }
             }
         }
@@ -1411,8 +1431,11 @@ else {
     push @command, '-o', "ConnectTimeout=$timeout" if $timeout;
 
     if (not $quiet) {
-        $fnret =
-          OVH::Bastion::account_config(account => $self, key => OVH::Bastion::OPT_ACCOUNT_IDLE_IGNORE, public => 1);
+        $fnret = OVH::Bastion::account_config(
+            account => $Self->name,
+            key     => OVH::Bastion::OPT_ACCOUNT_IDLE_IGNORE,
+            public  => 1
+        );
         if ($fnret && $fnret->value =~ /yes/) {
             osh_debug("Account is immune to idle");
         }
@@ -1454,7 +1477,7 @@ else {
 }
 
 # add current account name as LC_BASTION to be passed via ssh
-$ENV{'LC_BASTION'} = $self;
+$ENV{'LC_BASTION'} = $Self->name;
 
 $bastion_details{'mfa'}{'validated'}        //= \0;
 $bastion_details{'mfa'}{'type'}{'password'} //= \0;
@@ -1463,7 +1486,7 @@ $bastion_details{'piv'}{'enforced'}         //= \0;
 $bastion_details{'from'} = {addr => $ipfrom,    host => $hostfrom,    port => $portfrom + 0};
 $bastion_details{'via'}  = {addr => $bastionip, host => $bastionhost, port => $bastionport + 0, name => $bastionName};
 $bastion_details{'to'}   = {addr => $ip,        host => $hostto,      port => $port + 0, user => $user};
-$bastion_details{'account'} = $self;
+$bastion_details{'account'} = $Self->name;
 $bastion_details{'uniqid'}  = $log_uniq_id;
 $bastion_details{'version'} = $OVH::Bastion::VERSION;
 
@@ -1504,7 +1527,7 @@ if ($wait) {
 }
 
 my $logret = OVH::Bastion::log_access_insert(
-    account     => $self,
+    account     => $Self->name,
     cmdtype     => $telnet ? 'telnet' : 'ssh',
     allowed     => 1,
     ipfrom      => $ipfrom,
@@ -1539,10 +1562,10 @@ if ($JITMFARequired) {
     my $skipMFA  = 0;
     my $realmMFA = 0;
     if ($proactiveMfa) {
-        print "As proactive MFA has been requested, entering MFA phase for $self.\n";
+        print "As proactive MFA has been requested, entering MFA phase for " . $Self->name . "\n";
     }
     else {
-        print "As this is required for this host, entering MFA phase for $self.\n";
+        print "As this is required for this host, entering MFA phase for " . $Self->name . "\n";
     }
     if ($JITMFARequired eq 'totp' && !$isMfaTOTPConfigured) {
         if ($hasMfaTOTPBypass) {
@@ -1553,7 +1576,9 @@ if ($JITMFARequired) {
         }
         else {
             main_exit(OVH::Bastion::EXIT_MFA_TOTP_SETUP_REQUIRED, 'mfa_totp_setup_required',
-                "Sorry $self, but you need to setup the Multi-Factor Authentication before connecting to this host,\n"
+                    "Sorry "
+                  . $Self->name
+                  . ", but you need to setup the Multi-Factor Authentication before connecting to this host,\n"
                   . "please use the `--osh selfMFASetupTOTP' option to do so");
         }
     }
@@ -1566,7 +1591,9 @@ if ($JITMFARequired) {
         }
         else {
             main_exit(OVH::Bastion::EXIT_MFA_PASSWORD_SETUP_REQUIRED, 'mfa_password_setup_required',
-                "Sorry $self, but you need to setup the Multi-Factor Authentication before connecting to this host,\n"
+                    "Sorry "
+                  . $Self->name
+                  . ", but you need to setup the Multi-Factor Authentication before connecting to this host,\n"
                   . "please use the `--osh selfMFASetupPassword' option to do so");
         }
     }
@@ -1581,7 +1608,9 @@ if ($JITMFARequired) {
         }
         else {
             main_exit(OVH::Bastion::EXIT_MFA_ANY_SETUP_REQUIRED, 'mfa_any_setup_required',
-                "Sorry $self, but you need to setup the Multi-Factor Authentication before connecting to this host,\n"
+                    "Sorry "
+                  . $Self->name
+                  . ", but you need to setup the Multi-Factor Authentication before connecting to this host,\n"
                   . "please use either the `--osh selfMFASetupPassword' or the `--osh selfMFASetupTOTP' option, "
                   . "at your discretion, to do so");
         }
@@ -1597,7 +1626,7 @@ if ($JITMFARequired) {
         print "... you already validated MFA proactively.\n";
     }
     else {
-        $fnret = OVH::Bastion::do_pamtester(self => $self, sysself => $sysself);
+        $fnret = OVH::Bastion::do_pamtester(self => $Self->name, sysself => $Self->sysName);
         $fnret or main_exit(OVH::Bastion::EXIT_MFA_FAILED, 'mfa_failed', $fnret->msg);
 
         # so that the remote server, which can be a bastion in case we're chaining, can enforce its own policy
@@ -1636,7 +1665,7 @@ exec(
     $logret->value->{'insert_id'},
     $logret->value->{'db_name'},
     $logret->value->{'uniq_id'},
-    $self, @ttyrec
+    $Self->name, @ttyrec
 ) or exit(OVH::Bastion::EXIT_EXEC_FAILED);
 
 exit OVH::Bastion::EXIT_OK;
@@ -1652,7 +1681,7 @@ sub exit_sig {
     my ($sig) = @_;
     if (defined $log_insert_id and defined $log_db_name) {
         OVH::Bastion::log_access_update(
-            account   => $self,
+            account   => $Self->name,
             insert_id => $log_insert_id,
             db_name   => $log_db_name,
             uniq_id   => $log_uniq_id,
@@ -1751,7 +1780,7 @@ Usage (osh cmd): $bastionName --osh [OSH_COMMAND] [OSH_OPTIONS]
     use: $bastionName --osh OSH_COMMAND --help
 
 EOF
-    if (OVH::Bastion::is_admin(account => $self)) {
+    if (OVH::Bastion::is_admin(account => $Self->name)) {
         print STDERR <<"EOF" ;
 [ADMIN_OPTIONS]
     --ssh-as ACCOUNT    Impersonate another account to ssh connect somewhere on his or her behalf. This is logged.

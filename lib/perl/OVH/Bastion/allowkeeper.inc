@@ -858,9 +858,11 @@ sub is_admin {
     my $account = $params{'account'};
     my $cache   = $params{'cache'};     # allow cache use of sys_getgr_name() through is_user_in_group()
 
-    if (not $account) {
-        $account = $sudo ? $ENV{'SUDO_USER'} : OVH::Bastion::get_user_from_env()->value;
+    if ($account) {
+        die "FIXME use Account::isAdmin()"; # FIXME
     }
+
+    $account = $sudo ? $ENV{'SUDO_USER'} : OVH::Bastion::get_user_from_env()->value;
 
     if (not $account) {
         return R('ERR_INTERNAL_ERROR');
