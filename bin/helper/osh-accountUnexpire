@@ -58,20 +58,18 @@ if (OVH::Bastion::get_user_from_env()->value ne $account) {
 
 #>PARAMS:ACCOUNT
 osh_debug("Checking account");
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
+
+my $Account = OVH::Bastion::Account->newFromName(name => $account);
+$Account or HEXIT($Account);
+
+$fnret = $Account->check();
 $fnret or HEXIT($fnret);
-$account = $fnret->value->{'account'};    # untainted
 
 #<PARAMS:ACCOUNT
 
-my $accounthome = $fnret->value->{'dir'};
-if (!-d $accounthome) {
-    HEXIT('ERR_INVALID_HOME', msg => "Invalid HOME directory for this account");
-}
-
-$fnret = OVH::Bastion::is_account_nonexpired(sysaccount => $account);
-$fnret->is_err and HEXIT($fnret);         # couldn't read file or other error
-$fnret->is_ok  and HEXIT($fnret);         # wasn't expired
+$fnret = $Account->isNotExpired();
+$fnret->is_err and HEXIT($fnret);    # couldn't read file or other error
+$fnret->is_ok  and HEXIT($fnret);    # wasn't expired
 
 # is_ko: is expired
 my $days     = $fnret->value->{'days'};
@@ -80,4 +78,4 @@ my $filepath = $fnret->value->{'filepath'};
 $fnret = OVH::Bastion::touch_file($filepath);
 $fnret or HEXIT($fnret);
 
-HEXIT('OK', value => {account => $account, days => $days});
+HEXIT('OK', value => {account => $Account->name, days => $days});

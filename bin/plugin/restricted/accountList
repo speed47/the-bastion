@@ -93,9 +93,14 @@ foreach my $account (sort keys %$accounts) {
     # same for includes
     next if ($includere && $account !~ $includere);
 
+    my $Account = OVH::Bastion::Account->newFromName(name => $account);
+    $Account or next;
+
+    $Account->isExisting() or next;
+
     my %states;
     $states{'is_active'} = undef;
-    $fnret = OVH::Bastion::is_account_active(account => $account);
+    $fnret = $Account->isActive();
     if ($fnret->is_ok) {
         next if $inactiveOnly;
         $states{'is_active'} = 1;
@@ -105,7 +110,7 @@ foreach my $account (sort keys %$accounts) {
     }
 
     if ($audit) {
-        $fnret = OVH::Bastion::is_account_ttl_nonexpired(sysaccount => $account, account => $account);
+        $fnret = $Account->isTTLNotExpired();
         $states{'is_ttl_expired'} = undef;
         if ($fnret->is_ok) {
             $states{'is_ttl_expired'} = 0;
@@ -115,7 +120,7 @@ foreach my $account (sort keys %$accounts) {
             $states{'ttl_expired_details'} = $fnret->value->{'details'};
         }
 
-        $fnret = OVH::Bastion::is_account_nonexpired(sysaccount => $account);
+        $fnret = $Account->isNotExpired();
         $states{'is_expired'} = undef;
         if ($fnret->is_ok) {
             $states{'is_expired'} = 0;

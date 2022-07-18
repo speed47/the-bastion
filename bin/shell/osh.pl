@@ -180,7 +180,7 @@ if (-e '/home/allowkeeper/maintenance') {
 # Does the user have a TTL, and if yes, has it expired?
 #
 
-$fnret = OVH::Bastion::is_account_ttl_nonexpired(account => $Self->name, sysaccount => $Self->sysName);    # TODO
+$fnret = $Self->isTTLNotExpired();
 if (!$fnret) {
     main_exit(OVH::Bastion::EXIT_TTL_EXPIRED, "ttl_expired", $fnret->msg);
 }
@@ -188,7 +188,7 @@ if (!$fnret) {
 #
 # Second check : has account logged-in recently enough to be allowed ?
 #
-$fnret = OVH::Bastion::is_account_nonexpired(sysaccount => $Self->sysName, remoteaccount => $Self->remoteName);   # TODO
+$fnret = $Self->isNotExpired();
 if ($fnret->is_err) {
 
     # internal error, warn and pass

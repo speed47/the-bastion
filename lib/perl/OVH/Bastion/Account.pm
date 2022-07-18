@@ -8,6 +8,9 @@ use Memoize;
 use OVH::Bastion;
 use OVH::Result;
 
+# instantiate a new account corresponding to the one we have here,
+# this in effects nullify all cache handled by memoize for this new instance,
+# hence the name ->refresh()
 sub refresh {
     my $this = shift;
     return newFromName(__PACKAGE__, $this->name);
@@ -44,6 +47,7 @@ sub newFromName {
         uid        => undef, # set in JIT by isExisting()
         gid        => undef, # set in JIT by isExisting()
         home       => undef, # set in JIT by isExisting()
+        allowkeeperHome => '/home/allowkeeper/'.$fnret->value->{'account'},
     };
 
     bless $Account, 'OVH::Bastion::Account';
@@ -100,14 +104,48 @@ sub home {
     return $this->{'home'};
 }
 
+sub allowkeeperHome {
+    my $this = shift;
+    return $this->{'allowkeeperHome'};
+}
+
 memoize('getConfig');
 sub getConfig {
-    my $this = shift;
-    my $key  = shift;
+    my ($this, %params) = @_;
+    my $compositeKey = $params{'key'};
+    my $fnret;
 
-    # key => OVH::Bastion::OPT_ACCOUNT_ALWAYS_ACTIVE,  public  => 1
-    # TODO
-    return 1;
+    if (!$compositeKey) {
+        return R('ERR_MISSING_PARAMETER', msg => "Missing required parameter 'key'");
+    }
+
+    my ($type, $key) = $compositeKey =~ m{^(private|public)/([a-zA-Z0-9_-]+)$});
+    if (!$type || !$key) {
+        return R('ERR_INVALID_PARAMETER', msg => "Invalid configuration key asked ($compositeKey)");
+    }
+
+    $this->check() or return;
+
+    # private:
+    # /home/user/config.key
+    # /home/user/config_remotename.key
+    # public:
+    # /home/allowkeeper/user/config.key
+    # /home/allowkeeper/user/config_remotename.key
+    my $filename = sprintf("%s/config%s.%s",
+        $type eq 'public' ? $this->allowkeeperHome : $this->home,
+        $this->remoteName ? '_'.$this->remoteName : '',
+        $key
+    );
+
+    # getter mode
+    my $fh;
+    if (!open($fh, '<', $filename)) {
+        return R('ERR_CANNOT_OPEN_FILE', msg => "Error while trying to open file $filename for read ($!)");
+    }
+    my $getvalue = do { local $/ = undef; <$fh> };
+    close($fh);
+    return R('OK', value => $getvalue);
 }
 
 memoize('isActive');
@@ -132,7 +170,7 @@ sub isActive {
     }
 
     # If account has the flag in public config, then is active
-    if ($this->getConfig('always_active')) {
+    if ($this->getConfig('public/always_active')) {
         return R('OK');
     }
 
@@ -183,10 +221,152 @@ sub isActive {
     return R('KO_INACTIVE_ACCOUNT');
 }
 
+memoize('isTTLNotExpired');
+sub isTTLNotExpired {
+    my ($this, %params) = @_;
+    my $fnret;
+
+    $this->isExisting() or return;
+
+    $fnret = $this->getConfig('private/account_ttl');
+    if ($fnret) {
+        my $ttl = $fnret->value;
+        if ($ttl !~ /^[0-9]+$/) {
+            warn_syslog("Invalid TTL value '$ttl' for account '".$this->name."', denying access");
+            return R('ERR_INVALID_TTL',
+                msg => "Issue with your account TTL configuration, access denied. "
+                  . "Please check with an administrator");
+        }
+
+        $fnret = $this->getConfig('private/creation_timestamp');
+        my $created = $fnret->value;
+        if ($created !~ /^[0-9]+$/) {
+            warn_syslog("Invalid account creation time '$created' for account '".$this->name."', denying access");
+            return R('ERR_INVALID_TTL',
+                msg => "Issue with your account TTL configuration, access denied. "
+                  . "Please check with an administrator");
+        }
+
+        my $expiryTime = $created + $ttl;
+        if ($expiryTime < time()) {
+            $fnret = OVH::Bastion::duration2human(seconds => time() - $expiryTime);
+            return R(
+                'KO_TTL_EXPIRED',
+                msg   => "Sorry ".$this->name.", your account TTL has expired since " . $fnret->value->{'human'},
+                value => {expiry_time => $expiryTime, details => $fnret->value}
+            );
+        }
+
+        $fnret = OVH::Bastion::duration2human(seconds => $expiryTime - time());
+        return R('OK_TTL_VALID', value => {expiry_time => $expiryTime, details => $fnret->value});
+    }
+    return R('OK_NO_TTL');
+}
+
+memoize('isNotExpired');
+sub isNotExpired {
+    my ($this, %params) = @_;
+
+    $this->isExisting() or return;
+
+    # accountMaxInactiveDays is the max allowed inactive days to not block login. 0 means feature disabled.
+    my $accountMaxInactiveDays = 0;
+    my $fnret                  = OVH::Bastion::config('accountMaxInactiveDays');
+    if ($fnret and $fnret->value > 0) {
+        $accountMaxInactiveDays = $fnret->value;
+    }
+
+    # some accounts might have a specific configuration overriding the global one
+    $fnret = $this->getConfig('public/max_inactive_days');
+    if ($fnret) {
+        $accountMaxInactiveDays = $fnret->value;
+    }
+
+    my $isFirstLogin;
+    my $lastlog;
+    # XXX HERE
+    my $filepath = sprintf("/home/%s/lastlog%s", $this->name, $this->remoteName ? "_".$this->remoteName : ""); # FIXME move login into Account
+    my $value    = {filepath => $filepath};
+    if (-e $filepath) {
+        $isFirstLogin = 0;
+        $lastlog      = (stat(_))[9];
+        osh_debug("is_account_nonexpired: got lastlog date: $lastlog");
+
+        # if lastlog file is available, fetch some info from it
+        if (open(my $lastloginfh, "<", $filepath)) {
+            my $info = <$lastloginfh>;
+            chomp $info;
+            close($lastloginfh);
+            $value->{'info'} = $info;
+        }
+    }
+    else {
+        my ($previousDir) = getcwd() =~ m{^(/[a-z0-9_./-]+)}i;
+        if (!chdir("/home/".$this->sysName)) {
+            osh_debug("is_account_nonexpired: no exec access to the folder!");
+            return R('ERR_NO_ACCESS', msg => "No read access to this account folder to compute last login time");
+        }
+        chdir($previousDir);
+        $isFirstLogin = 1;
+
+        # get the account creation timestamp as the lastlog
+        $fnret = $this->getConfig('private/creation_timestamp');
+        if ($fnret && $fnret->value) {
+            $lastlog = $fnret->value;
+            osh_debug("is_account_nonexpired: got creation date from config.creation_timestamp: $lastlog");
+        }
+        elsif (-e sprintf("/home/%s/accountCreate.comment", $this->sysName)) {
+
+            # fall back to the stat of the accountCreate.comment file
+            $lastlog = (stat(_))[9];
+            osh_debug("is_account_nonexpired: got creation date from accountCreate.comment stat: $lastlog");
+        }
+        else {
+            # last fall back to the stat of the ttyrec/ folder
+            $lastlog = (stat(sprintf("/home/%s/ttyrec", $this->sysName)))[9];
+            osh_debug("is_account_nonexpired: got creation date from ttyrec/ stat: $lastlog");
+        }
+    }
+
+    my $seconds = time() - $lastlog;
+    my $days    = int($seconds / 86400);
+    $value->{'days'}                = $days;
+    $value->{'seconds'}             = $seconds;
+    $value->{'already_seen_before'} = !$isFirstLogin;
+    osh_debug("Last account activity: $days days ago");
+
+    if ($accountMaxInactiveDays == 0) {
+
+        # no expiration configured, allow login and return some info
+        return R('OK_FIRST_LOGIN',               value => $value) if $isFirstLogin;
+        return R('OK_EXPIRATION_NOT_CONFIGURED', value => $value);
+    }
+    else {
+        if ($days < $accountMaxInactiveDays) {
+
+            # expiration configured, but account not expired, allow login
+            return R('OK_NOT_EXPIRED', value => $value);
+        }
+        else {
+            # account expired, deny login
+            my $msg = OVH::Bastion::config("accountExpiredMessage")->value;
+            $msg = "Sorry, but your account has expired (#DAYS# days), access denied by policy." if !$msg;
+            $msg =~ s/#DAYS#/$days/g;
+            return R(
+                'KO_EXPIRED',
+                value => $value,
+                msg   => $msg,
+            );
+        }
+    }
+    return R('ERR_INTERNAL_ERROR');
+}
+
 memoize('isExisting');
 sub isExisting {
     my ($this, %params) = @_;
     my $nocache = $params{'nocache'};
+    # FIXME check spurious args and warn
 
     my %entry;
     if (OVH::Bastion::is_mocking()) {
@@ -235,6 +415,24 @@ sub isExisting {
         return R('OK');
     }
     return R('KO_NOT_FOUND', msg => sprintf("Account '%s' doesn't exist", $this->name));
+}
+
+# checks that isExisting() and potentially other tiny things to ensure the account is sane
+memoize('check');
+sub check {
+    my ($this, %params) = @_;
+
+    $this->isExisting() or return;
+
+    if (!-d $this->home) {
+        return R('KO_INVALID_DIRECTORY', msg => "This account's home directory doesn't exist");
+    }
+
+    if (!-d $this->allowkeeperHome) {
+        return R('KO_INVALID_DIRECTORY', msg => "This account's allowkeeper home directory doesn't exist");
+    }
+
+    return R('OK');
 }
 
 # check if account name is valid, i.e. non-weird chars and non reserved parts
