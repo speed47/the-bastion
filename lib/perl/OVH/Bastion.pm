@@ -728,131 +728,6 @@ sub get_plugin_list {
     return R('OK', value => \%plugins);
 }
 
-sub can_account_execute_plugin {
-    my %params  = @_;
-    my $account = $params{'account'} || OVH::Bastion::get_user_from_env()->value;
-    my $plugin  = $params{'plugin'};
-    my $cache = $params{'cache'};    # allow cache use in get_user_groups(), is_user_in_group() etc.
-    my $fnret;
-
-    if (not $plugin or not $account) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory param account or plugin");
-    }
-
-    # sanitize for -T
-    my ($sanePlugin) = $plugin =~ /^([a-zA-Z0-9_-]+)$/;
-    if ($plugin ne $sanePlugin) {
-        return R('ERR_INVALID_PARAMETER', msg => "Parameter 'plugin' contains invalid characters");
-    }
-    $plugin = $sanePlugin;
-
-    my $path_plugin = $OVH::Bastion::BASEPATH . '/bin/plugin';
-
-    # first, check if the plugin is readonly-proof if we are in readonly mode (slave)
-    $fnret = OVH::Bastion::config('readOnlySlaveMode');
-    $fnret or return $fnret;
-    if ($fnret->value and not OVH::Bastion::is_plugin_readonly_proof(plugin => $plugin)) {
-        return R('ERR_READ_ONLY',
-            msg => "You can't use this command on this bastion instance, as this is a write/modify command,\n"
-              . "and this bastion instance is read-only (slave). Please do this on the master instance of my cluster instead!"
-        );
-    }
-
-    # realm accounts are very restricted
-    if ($account =~ m{^realm_}) {
-        return R('ERR_SECURITY_VIOLATION', msg => "Realm support accounts can't execute any plugin by themselves");
-    }
-    if ($account =~ m{/} && !grep { $plugin eq $_ }
-        qw{ alive help info mtr nc ping selfForgetHostKey selfListAccesses selfListEgressKeys })
-    {
-        return R('ERR_REALM_USER',
-            msg => "Realm accounts can't execute this plugin, use --osh help to get the allowed plugin list");
-    }
-
-    # open plugins, always start to look there
-    if (-f ($path_plugin . '/open/' . $plugin)) {
-        return R('OK', value => {fullpath => $path_plugin . '/open/' . $plugin, type => 'open', plugin => $plugin});
-    }
-
-    # aclkeeper/gatekeepers/owners plugins
-    if (   -f ($path_plugin . '/group-aclkeeper/' . $plugin)
-        or -f ($path_plugin . '/group-gatekeeper/' . $plugin)
-        or -f ($path_plugin . '/group-owner/' . $plugin))
-    {
-
-        # need to parse group to see if maybe member of group-gatekeeper or group-owner (or super owner)
-        my %canDo = (gatekeeper => 0, aclkeeper => 0, owner => 0);
-
-        $fnret = OVH::Bastion::get_user_groups(extra => 1, account => $account, cache => $cache);
-        my @userGroups = $fnret ? @{$fnret->value} : ();
-
-        foreach my $type (qw{ aclkeeper gatekeeper owner }) {
-            if (-f "$path_plugin/group-$type/$plugin") {
-
-                # we can always execute these commands if we are a super owner
-                my $canDo = OVH::Bastion::is_super_owner(account => $account, cache => $cache) ? 1 : 0;
-
-                # or if we are $type on at least one group
-                $canDo += grep { /^key.*-\Q$type\E$/ } @userGroups;
-                return R(
-                    'OK',
-                    value => {
-                        fullpath => "$path_plugin/group-$type/$plugin",
-                        type     => "group-$type",
-                        plugin   => $plugin
-                    }
-                ) if $canDo;
-                return R(
-                    'KO_PERMISSION_DENIED',
-                    value => {type => "group-type", plugin => $plugin},
-                    msg   => "Sorry, you must be a group $type to use this command"
-                );
-            }
-        }
-
-        # unreachable code:
-        return R(
-            'KO_PERMISSION_DENIED',
-            value => {type => 'group-unknown', plugin => $plugin},
-            msg   => "Permission denied"
-        );
-    }
-
-    # restricted plugins (osh-* system groups based)
-    if (-f ($path_plugin . '/restricted/' . $plugin)) {
-        if (OVH::Bastion::is_user_in_group(user => $account, group => "osh-$plugin", cache => $cache)) {
-            return R('OK',
-                value => {fullpath => $path_plugin . '/restricted/' . $plugin, type => 'restricted', plugin => $plugin}
-            );
-        }
-        else {
-            return R(
-                'KO_PERMISSION_DENIED',
-                value => {type => 'restricted', plugin => $plugin},
-                msg   => "Sorry, this command is restricted and requires you to be specifically granted"
-            );
-        }
-    }
-
-    # admin plugins
-    if (-f ($path_plugin . '/admin/' . $plugin)) {
-        if (OVH::Bastion::is_admin(account => $account, cache => $cache)) {
-            return R('OK',
-                value => {fullpath => $path_plugin . '/admin/' . $plugin, type => 'admin', plugin => $plugin});
-        }
-        else {
-            return R(
-                'KO_PERMISSION_DENIED',
-                value => {type => 'admin', plugin => $plugin},
-                msg   => "Sorry, this command is only available to bastion admins"
-            );
-        }
-    }
-
-    # still here ? sorry.
-    return R('KO_UNKNOWN_PLUGIN', value => {type => 'open'}, msg => "Unknown command");
-}
-
 sub is_plugin_readonly_proof {
     my %params = @_;
     my $plugin = $params{'plugin'};
@@ -1088,13 +963,12 @@ sub build_ttyrec_cmdline_part2of2 {
 }
 
 sub do_pamtester {
-    my %params  = @_;
-    my $sysself = $params{'sysself'};
-    my $self    = $params{'self'};
+    my %params = @_;
+    my $Self   = $params{'Self'};
     my $fnret;
 
-    if (!$sysself || !$self) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory arguments 'sysself' or 'self'");
+    if (!$Self) {
+        return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory argument 'Self'");
     }
 
     # if we're being called as part of the batch plugin, OSH_BATCH will be set and it means
@@ -1111,11 +985,13 @@ sub do_pamtester {
     while (1) {
         my $pamsysret;
         if (OVH::Bastion::is_freebsd()) {
-            $pamsysret =
-              system('sudo', '-n', '-u', 'root', '--', '/usr/bin/env', 'pamtester', 'sshd', $sysself, 'authenticate');
+            $pamsysret = system(
+                'sudo',         '-n',        '-u',   'root',         '--',
+                '/usr/bin/env', 'pamtester', 'sshd', $Self->sysName, 'authenticate'
+            );
         }
         else {
-            $pamsysret = system('pamtester', 'sshd', $sysself, 'authenticate');
+            $pamsysret = system('pamtester', 'sshd', $Self->sysName, 'authenticate');
         }
         if ($pamsysret < 0) {
             return R('KO_MFA_FAILED',
@@ -1133,7 +1009,7 @@ sub do_pamtester {
         # see the bastion.conf.dist file for usage example.
         my $MFAPostCommand = OVH::Bastion::config('MFAPostCommand')->value;
         if (ref $MFAPostCommand eq 'ARRAY' && @$MFAPostCommand) {
-            s/%ACCOUNT%/$self/g for @$MFAPostCommand;
+            s/%ACCOUNT%/$Self->name/g for @$MFAPostCommand;    # FIXME should be sysName?
             $fnret = OVH::Bastion::execute(cmd => $MFAPostCommand, must_succeed => 1);
             if (!$fnret) {
                 warn_syslog("MFAPostCommand returned a non-zero value: " . $fnret->msg);

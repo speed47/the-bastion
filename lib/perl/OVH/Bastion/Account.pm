@@ -375,7 +375,7 @@ sub getGroups {
         # we must be a member of this sysgroup
         next if !(any { $this->sysName eq $_ } @{ $fnret->value->{$sysgroup}->{'members'} });
 
-        # false positive ## no critic(RegularExpressions::ProhibitUnusedCapture)
+        ## no critic(RegularExpressions::ProhibitUnusedCapture) # false positive
         if ($sysgroup =~ /^key(?<groupname>.+?)(-(?<type>gatekeeper|aclkeeper|owner))?$/) {
             my $groupname = $+{'groupname'};
             my $type = $+{'type'};

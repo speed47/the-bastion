@@ -31,12 +31,7 @@ $SIG{$_} = \&exit_sig for qw{ INT TERM SEGV HUP PIPE };
 # safe umask
 umask(0027);
 
-# sanitize user for taint mode
-#my $self = OVH::Bastion::get_user_from_env()->value;
-#my $home = OVH::Bastion::get_home_from_env()->value;
-#my ($Self->sysName, $realm, $remoteself);    # to handle realm cases, will be filled later, look for # REALM below
-
-# $Self can be an invalid OVH::Result! It's checked after we define main_exit()
+# $Self can be a false OVH::Result! It's checked after we define main_exit() below
 my $Self = OVH::Bastion::Account->newFromEnv();
 
 # both needs to be there because in case of SIG, we need them in the handler
@@ -49,7 +44,7 @@ $ENV{'UNIQID'} = $log_uniq_id;    # some modules need it, also used in warn/die 
 
 # fetch basic connection info
 my ($ipfrom, $portfrom, $bastionip, $bastionport) = split(/\s/, $ENV{'SSH_CONNECTION'});
-my $hostfrom    = OVH::Bastion::ip2host($ipfrom)->value    || $ipfrom;
+my $hostfrom    = OVH::Bastion::ip2host($ipfrom)->value    || $ipfrom;      # FIXME if ipfrom is undef?
 my $bastionhost = OVH::Bastion::ip2host($bastionip)->value || $bastionip;
 
 # sub used to exit from this shell, also handles logs for early exits
@@ -469,7 +464,7 @@ if ($bind) {
 # handling interactive session, plugins/osh commands, or a connection request
 if ($proactiveMfa) {
     print "As proactive MFA has been requested, entering MFA phase for " . $Self->name . "\n";
-    $fnret = OVH::Bastion::do_pamtester(self => $Self->name, sysself => $Self->sysName);
+    $fnret = OVH::Bastion::do_pamtester(Self => $Self);
     $fnret or main_exit(OVH::Bastion::EXIT_MFA_FAILED, 'mfa_failed', $fnret->msg);
 
     # if we're still here, it succeeded
@@ -1027,7 +1022,7 @@ if ($osh_command) {
                 print "... you already validated MFA proactively.\n";
             }
             else {
-                $fnret = OVH::Bastion::do_pamtester(self => $Self->name, sysself => $Self->sysName);
+                $fnret = OVH::Bastion::do_pamtester(Self => $Self);
                 $fnret or main_exit(OVH::Bastion::EXIT_MFA_FAILED, 'mfa_failed', $fnret->msg);
             }
 
@@ -1626,7 +1621,7 @@ if ($JITMFARequired) {
         print "... you already validated MFA proactively.\n";
     }
     else {
-        $fnret = OVH::Bastion::do_pamtester(self => $Self->name, sysself => $Self->sysName);
+        $fnret = OVH::Bastion::do_pamtester(Self => $Self);
         $fnret or main_exit(OVH::Bastion::EXIT_MFA_FAILED, 'mfa_failed', $fnret->msg);
 
         # so that the remote server, which can be a bastion in case we're chaining, can enforce its own policy
