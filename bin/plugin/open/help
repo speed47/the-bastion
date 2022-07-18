@@ -131,7 +131,7 @@ while ($i < scalar @knownPlugins) {
         my $curLen;
         my $curIndex;
         foreach my $cmd (@plugins) {
-            $fnret = OVH::Bastion::can_account_execute_plugin(account => $self, plugin => $cmd, cache => 1);
+            $fnret = $Self->canExecutePlugin(plugin => $cmd);
             next unless $fnret;
             if (($curLen + length($fnret->value->{'plugin'})) > 80) {
                 $curIndex++;

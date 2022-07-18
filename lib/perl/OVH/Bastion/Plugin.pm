@@ -15,8 +15,8 @@ $SIG{'PIPE'} = 'IGNORE';    # continue even if osh_info gets a SIGPIPE because t
 $| = 1;
 
 use Exporter 'import';
-our ($user, $ip, $host, $port, $scriptName, $self, $sysself, $realm, $remoteself, $HOME, $savedArgs); ## no critic (ProhibitPackageVars)
-our @EXPORT = qw( $user $ip $host $port $scriptName $self $sysself $realm $remoteself $HOME $savedArgs ); ## no critic (ProhibitAutomaticExportation)
+our ($user, $ip, $host, $port, $scriptName, $Self, $self, $sysself, $realm, $remoteself, $HOME, $savedArgs); ## no critic (ProhibitPackageVars)
+our @EXPORT = qw( $user $ip $host $port $scriptName $Self $self $sysself $realm $remoteself $HOME $savedArgs ); ## no critic (ProhibitAutomaticExportation)
 our @EXPORT_OK = qw( help );
 
 my $_helptext;
@@ -102,6 +102,7 @@ sub begin {
 
     $HOME = OVH::Bastion::get_home_from_env()->value;
     $self = OVH::Bastion::get_user_from_env()->value;
+    $Self = OVH::Bastion::Account->newFromEnv();
 
     # if we're generating documentation (PLUGIN_DOCGEN is set), leave the BASTION_ACCOUNT placeholder
     if ($_helptext && !$ENV{'PLUGIN_DOCGEN'}) {

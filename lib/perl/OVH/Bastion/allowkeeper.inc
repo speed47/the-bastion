@@ -5,6 +5,7 @@ package OVH::Bastion;
 use common::sense;
 
 use Time::Piece;    # $t->strftime
+use Carp;
 
 # Check if a system user belongs to a specific system group
 sub is_user_in_group {
@@ -859,7 +860,7 @@ sub is_admin {
     my $cache   = $params{'cache'};     # allow cache use of sys_getgr_name() through is_user_in_group()
 
     if ($account) {
-        die "FIXME use Account::isAdmin()"; # FIXME
+        Carp::confess "FIXME use Account::isAdmin()";    # FIXME
     }
 
     $account = $sudo ? $ENV{'SUDO_USER'} : OVH::Bastion::get_user_from_env()->value;

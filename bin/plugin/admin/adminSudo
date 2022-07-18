@@ -39,14 +39,17 @@ if (not $sudoAs or not $sudoCmd) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing mandatory parameter 'sudo-as' or 'sudo-cmd'";
 }
 
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $sudoAs);
+my $AccountSudoAs = OVH::Bastion::Account->newFromName(name => $sudoAs);
+$AccountSudoAs or osh_exit($AccountSudoAs);
+
+$fnret = $AccountSudoAs->isExisting();
 $fnret or osh_exit($fnret);
 
-$fnret = OVH::Bastion::can_account_execute_plugin(account => $sudoAs, plugin => $sudoCmd);
+$fnret = $AccountSudoAs->canExecutePlugin(plugin => $sudoCmd);
 $fnret or osh_exit($fnret);
 
 my @cmd = qw( sudo -n -u );
-push @cmd, $sudoAs;
+push @cmd, $AccountSudoAs->sysName;
 push @cmd, qw( -- /usr/bin/env perl );
 push @cmd, $OVH::Bastion::BASEPATH . '/bin/shell/osh.pl';
 push @cmd, '-c';
@@ -65,14 +68,14 @@ OVH::Bastion::syslogFormatted(
     type      => 'security',
     fields    => [
         ['type',    'admin-sudo'],
-        ['account', $self],
-        ['sudo-as', $sudoAs],
+        ['account', $Self->name],
+        ['sudo-as', $AccountSudoAs->name],
         ['plugin', ($sudoCmd ? $sudoCmd : 'ssh')],
         ['params', $stringified]
     ]
 );
 
-osh_warn("ADMIN SUDO: $self, you'll now impersonate $sudoAs, this has been logged.");
+osh_warn("ADMIN SUDO: " . $Self->name . ", you'll now impersonate " . $AccountSudoAs->name . ", this has been logged.");
 
 $fnret = OVH::Bastion::execute(cmd => \@cmd, noisy_stdout => 1, noisy_stderr => 1, expects_stdin => 1);
 

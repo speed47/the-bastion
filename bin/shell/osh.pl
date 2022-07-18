@@ -521,7 +521,7 @@ if ($interactive and not $ENV{'OSH_IN_INTERACTIVE_SESSION'}) {
         osh_warn($logret->msg);
     }
 
-    OVH::Bastion::interactive(realOptions => $realOptions, timeoutHandler => \&exit_sig, self => $Self->name);
+    OVH::Bastion::interactive(realOptions => $realOptions, timeoutHandler => \&exit_sig, Self => $Self);
 
     # this functions may never return, especially in case of idle timeout exit
 
@@ -900,7 +900,7 @@ if ($osh_command) {
     $osh_command = $legacy2new{$osh_command} if $legacy2new{$osh_command};
 
     # Then test for rights
-    $fnret = OVH::Bastion::can_account_execute_plugin(account => $Self->name, plugin => $osh_command);
+    $fnret = $Self->canExecutePlugin(plugin => $osh_command);
 
     my $logret = OVH::Bastion::log_access_insert(
         account     => $Self->name,

@@ -11,7 +11,8 @@ use OVH::Result;
 # We handle our importer's '$self' var, this is by design.
 use Exporter 'import';
 our $self;    ## no critic (ProhibitPackageVars)
-our @EXPORT = qw( $self HEXIT );    ## no critic (ProhibitAutomaticExportation)
+our $Self;    ## no critic (ProhibitPackageVars)
+our @EXPORT = qw( $self $Self HEXIT );    ## no critic (ProhibitAutomaticExportation)
 
 # HEXIT aka "helper exit", used by helper scripts found in helpers/
 # Can be used in several ways:
@@ -70,5 +71,6 @@ if (not defined $self) {
         HEXIT('ERR_SUDO_NEEDED', msg => 'This command must be run under sudo');
     }
 }
+$Self = OVH::Bastion::Account->newFromName(name => $self);
 
 1;

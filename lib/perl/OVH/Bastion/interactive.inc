@@ -9,14 +9,14 @@ use POSIX ();
 my @rules;
 
 sub _get_prompt {
-    my ($self, $bastionName, $slaveOrMaster) = @_;
+    my ($Self, $bastionName, $slaveOrMaster) = @_;
     my $mfaOk = "";
     if ($ENV{'OSH_PROACTIVE_MFA'}) {
         $mfaOk = "[" . "\001\033[33m\002" . "MFA-OK" . "\001\033[1;35m\002]";
     }
     my $prompt = ""
       . "\001\033[0m\033[33m\002"
-      . $self
+      . $Self->name
       . "\001\033[1;35m\002" . "@"
       . "\001\033[32m\002"
       . $bastionName
@@ -41,8 +41,10 @@ sub interactive {
     my %params         = @_;
     my $realOptions    = $params{'realOptions'};
     my $timeoutHandler = $params{'timeoutHandler'};
-    my $self           = $params{'self'};
+    my $Self           = $params{'Self'};
     my $fnret;
+
+    $Self->isExisting() or return;
 
     my $bastionName            = OVH::Bastion::config('bastionName')->value();
     my $interactiveModeTimeout = OVH::Bastion::config('interactiveModeTimeout')->value() || 0;
@@ -68,7 +70,7 @@ EOM
 
     my @cmdlist = qw{ exit ssh mfa enable nomfa end };
     foreach my $plugin (sort keys %$pluginList) {
-        $fnret = OVH::Bastion::can_account_execute_plugin(plugin => $plugin, account => $self, cache => 1);
+        $fnret = $Self->canExecutePlugin(plugin => $plugin);
         next if !$fnret;
 
         push @cmdlist, $plugin;
@@ -189,7 +191,7 @@ EOM
             if ($item->{'pr'}) {
                 print "\n"
                   . join("\n", @{$item->{'pr'}}) . "\n"
-                  . _get_prompt_non_readline($self, $bastionName, $slaveOrMaster)
+                  . _get_prompt_non_readline($Self, $bastionName, $slaveOrMaster)
                   . $line;
                 return ();
             }
@@ -213,7 +215,7 @@ EOM
 
     my $BASTION_USER = OVH::Bastion::get_user_from_env()->value;
     alarm($interactiveModeTimeout);
-    while (defined(my $line = $term->readline(_get_prompt($self, $bastionName, $slaveOrMaster)))) {
+    while (defined(my $line = $term->readline(_get_prompt($Self, $bastionName, $slaveOrMaster)))) {
         alarm(0);      # disable timeout
         $line =~ s/^\s+|\s+$//g;
 
@@ -244,14 +246,14 @@ EOM
             if (lc($line) eq 'mfa' || $line =~ m{^en(a(b(le?)?)?)?$}) {
                 if (OVH::Bastion::config("interactiveModeProactiveMFAenabled")->value) {
                     print "As proactive MFA validation has been requested, entering MFA phase.\n";
-                    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $self);
+                    $fnret = $Self->isExisting();
                     if (!$fnret) {
                         warn_syslog("Couldn't get account details in interactive mode (" . $fnret->msg . ")");
                         main_exit(OVH::Bastion::EXIT_ACCOUNT_INVALID(),
                             "account_invalid", "Error while getting account details");
                     }
                     my $sysself = $fnret->value->{'sysaccount'};
-                    $fnret = OVH::Bastion::do_pamtester(self => $self, sysself => $sysself);
+                    $fnret = OVH::Bastion::do_pamtester(self => $Self->name, sysself => $sysself);
                     if ($fnret) {
                         print "Proactive MFA enabled, any command requiring MFA from now on will not ask you again.\n";
                         if ($interactiveModeProactiveMFAexpiration > 0) {

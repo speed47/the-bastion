@@ -5,6 +5,8 @@ use common::sense;
 use Fcntl;
 use POSIX qw(strftime);
 
+use OVH::Bastion::Account;
+
 our $VERSION = '3.09.00-rc3';
 
 BEGIN {

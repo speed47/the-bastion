@@ -335,6 +335,195 @@ sub isAdmin {
     return R('KO_ACCESS_DENIED', msg => "Account ".$this->name." is not a bastion administrator");
 }
 
+memoize('isSuperOwner');
+sub isSuperOwner {
+    my $this = shift;
+
+    my $fnret = $this->isExisting();
+    $fnret or return $fnret;
+
+    my $superOwnerList = OVH::Bastion::config('adminAccounts')->value();
+    if (any { $this->name eq $_ } @$superOwnerList) {
+        if (OVH::Bastion::is_user_in_group(group => "osh-superowner", user => $this->name)) {
+            return R('OK', msg => "Account ".$this->name." is a bastion superowner");
+        }
+    }
+    return R('KO_ACCESS_DENIED', msg => "Account ".$this->name." is not a bastion superowner");
+}
+
+# return a hash with keys being the bastion group names and as values,
+# a hash of relations to this account, i.e. member, guest, aclkeeper,
+# gatekeeper, owner.
+memoize('getGroups');
+sub getGroups {
+    my ($this, %params) = @_;
+    my $cache = $params{'cache'}; # allow use of sys_getgr_all's cache
+    my $fnret;
+
+    $this->isExisting() or return;
+
+    # we loop through all the system groups to find the ones having user
+    # as a member (here, member of the group just means member of the system
+    # group, this translate as either "member" or "guest" of the bastion group).
+    # for the key* groups, member means aclkeeper, gatekeeper or owner of the
+    # corresponding bastion group
+    $fnret = OVH::Bastion::sys_getgr_all(cache => $cache);
+    $fnret or return $fnret;
+
+    my %result;
+    foreach my $sysgroup (keys %{$fnret->value}) {
+        # we must be a member of this sysgroup
+        next if !(any { $this->sysName eq $_ } @{ $fnret->value->{$sysgroup}->{'members'} });
+
+        # false positive ## no critic(RegularExpressions::ProhibitUnusedCapture)
+        if ($sysgroup =~ /^key(?<groupname>.+?)(-(?<type>gatekeeper|aclkeeper|owner))?$/) {
+            my $groupname = $+{'groupname'};
+            my $type = $+{'type'};
+            if (!$type) {
+                # member or guest?
+                my $prefix = $this->remoteName ? "allowed_".$this->remoteName : "allowed";
+                if (-l sprintf("/home/allowkeeper/%s/%s.ip.%s", $this->sysName, $prefix, $groupname)) {
+                    $type = 'member';
+                }
+                else {
+                    $type = 'guest'; # FIXME later: we should check if there is at least one allowed.ip.partial
+                }
+            }
+            $result{$groupname}{$type} = 1;
+        }
+    }
+    return R('OK', value => \%result);
+}
+
+memoize('canExecutePlugin');
+sub canExecutePlugin {
+    my ($this, %params) = @_;
+    my $plugin = $params{'plugin'};
+    my $fnret;
+
+    $this->isExisting() or return;
+
+    if (!$plugin) {
+        return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory param plugin");
+    }
+
+    # sanitize for -T
+    my ($sanePlugin) = $plugin =~ /^([a-zA-Z0-9_-]+)$/;
+    if ($plugin ne $sanePlugin) {
+        return R('ERR_INVALID_PARAMETER', msg => "Parameter 'plugin' contains invalid characters");
+    }
+    $plugin = $sanePlugin;
+
+    my $path_plugin = $OVH::Bastion::BASEPATH . '/bin/plugin';
+
+    # first, check if the plugin is readonly-proof if we are in readonly mode (slave)
+    $fnret = OVH::Bastion::config('readOnlySlaveMode');
+    $fnret or return $fnret;
+    if ($fnret->value and not OVH::Bastion::is_plugin_readonly_proof(plugin => $plugin)) {
+        return R('ERR_READ_ONLY',
+            msg => "You can't use this command on this bastion instance, as this is a write/modify command,\n"
+              . "and this bastion instance is read-only (slave). Please do this on the master instance of my cluster instead!"
+        );
+    }
+
+    # realm accounts are very restricted
+    if ($this->name =~ m{^realm_}) { # FIXME ->type eq 'shared'?
+        return R('ERR_SECURITY_VIOLATION', msg => "Realm support accounts can't execute any plugin by themselves");
+    }
+    if ($this->name =~ m{/} && !grep { $plugin eq $_ } # FIXME ->type eq 'remote'?
+        qw{ alive help info mtr nc ping selfForgetHostKey selfListAccesses selfListEgressKeys })
+    {
+        return R('ERR_REALM_USER',
+            msg => "Realm accounts can't execute this plugin, use --osh help to get the allowed plugin list");
+    }
+
+    # open plugins, always start to look there
+    if (-f ($path_plugin . '/open/' . $plugin)) {
+        return R('OK', value => {fullpath => $path_plugin . '/open/' . $plugin, type => 'open', plugin => $plugin});
+    }
+
+    # aclkeeper/gatekeepers/owners plugins
+    if (   -f ($path_plugin . '/group-aclkeeper/' . $plugin)
+        or -f ($path_plugin . '/group-gatekeeper/' . $plugin)
+        or -f ($path_plugin . '/group-owner/' . $plugin))
+    {
+
+        # need to parse group to see if maybe member of group-gatekeeper or group-owner (or super owner)
+        my %canDo = (gatekeeper => 0, aclkeeper => 0, owner => 0);
+
+        $fnret = $this->getGroups();
+        $fnret or return $fnret;
+
+        my %groups = %{$fnret->value};
+
+        foreach my $type (qw{ aclkeeper gatekeeper owner }) {
+            if (-f "$path_plugin/group-$type/$plugin") {
+
+                # we can always execute these commands if we are a super owner
+                my $canDo = !!$this->isSuperOwner()+0;
+
+                # or if we are $type on at least one group
+                $canDo++ if (any { $_->{$type} } values %groups);
+
+                return R(
+                    'OK',
+                    value => {
+                        fullpath => "$path_plugin/group-$type/$plugin",
+                        type     => "group-$type",
+                        plugin   => $plugin
+                    }
+                ) if $canDo;
+                return R(
+                    'KO_PERMISSION_DENIED',
+                    value => {type => "group-type", plugin => $plugin},
+                    msg   => "Sorry, you must be a group $type to use this command"
+                );
+            }
+        }
+
+        # unreachable code:
+        return R(
+            'KO_PERMISSION_DENIED',
+            value => {type => 'group-unknown', plugin => $plugin},
+            msg   => "Permission denied"
+        );
+    }
+
+    # restricted plugins (osh-* system groups based)
+    if (-f ($path_plugin . '/restricted/' . $plugin)) {
+        if (OVH::Bastion::is_user_in_group(user => $this->sysName, group => "osh-$plugin", cache => 1)) {
+            return R('OK',
+                value => {fullpath => $path_plugin . '/restricted/' . $plugin, type => 'restricted', plugin => $plugin}
+            );
+        }
+        else {
+            return R(
+                'KO_PERMISSION_DENIED',
+                value => {type => 'restricted', plugin => $plugin},
+                msg   => "Sorry, this command is restricted and requires you to be specifically granted"
+            );
+        }
+    }
+
+    # admin plugins
+    if (-f ($path_plugin . '/admin/' . $plugin)) {
+        if ($this->isAdmin()) {
+            return R('OK',
+                value => {fullpath => $path_plugin . '/admin/' . $plugin, type => 'admin', plugin => $plugin});
+        }
+        else {
+            return R(
+                'KO_PERMISSION_DENIED',
+                value => {type => 'admin', plugin => $plugin},
+                msg   => "Sorry, this command is only available to bastion admins"
+            );
+        }
+    }
+
+    # still here ? sorry.
+    return R('KO_UNKNOWN_PLUGIN', value => {type => 'open'}, msg => "Unknown command");
+}
+
 =cut
 sub isValidAndExisting {
     my $this = shift;
