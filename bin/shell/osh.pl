@@ -31,8 +31,7 @@ $SIG{$_} = \&exit_sig for qw{ INT TERM SEGV HUP PIPE };
 # safe umask
 umask(0027);
 
-# $Self can be a false OVH::Result! It's checked after we define main_exit() below
-my $Self = OVH::Bastion::Account->newFromEnv();
+my $Self = OVH::Bastion::Account->newFromEnv(type => 'incoming');
 
 # both needs to be there because in case of SIG, we need them in the handler
 my $log_db_name   = undef;
@@ -53,7 +52,7 @@ sub main_exit {
 
     # if, this is an early exit, we didn't log anything yet in the sql, do it now
     OVH::Bastion::log_access_insert(
-        account     => $Self->name,
+        account     => $Self->isa('OVH::Bastion::Account') ? $Self->name : OVH::Bastion::get_user_from_env()->value,
         cmdtype     => 'abort',
         allowed     => undef,
         ipfrom      => $ipfrom,
@@ -87,9 +86,6 @@ if (!$Self) {
     $fnret = $Self;
     warn_syslog("An invalid account attempted to use the bastion (" . $fnret->msg . ")");
 
-    # we ensure $Self is now an OVH::Bastion::Account, albeit an invalid one,
-    # so that its ->name() is callable, mainly by the main_exit() func
-    $Self = OVH::Bastion::Account->newInvalid();
     main_exit(OVH::Bastion::EXIT_ACCOUNT_INVALID, "account_invalid", "The account is invalid (" . $fnret->msg . ")");
 }
 
@@ -104,36 +100,8 @@ my $config = $fnret->value;
 my $bastionName = $config->{'bastionName'};
 my $osh_debug   = $config->{'debug'};
 
-# REALM case: somebody from another realm (named xyz) connects with the realm_xyz account here,
-# and the real remote account name (which doesn't have an account here because it's from another realm)
-# is passed through LC_BASTION
-# FIXME move this logic to newFromName()
-
-=cut
-if ($self =~ /^realm_([a-zA-Z0-9_.-]+)/) {
-    if ($ENV{'LC_BASTION'}) {
-
-        # don't overwrite $self just yet because it might end up being invalid, and when we'll call main_exit 2 lines down,
-        # we won't log to the proper place if sql logs or access logs are enabled per account.
-        my $potentialSelf = sprintf("%s/%s", $1, $ENV{'LC_BASTION'});
-        $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $potentialSelf, realmOnly => 1);
-        $fnret
-          or main_exit(OVH::Bastion::EXIT_ACCOUNT_INVALID,
-            "account_invalid", "The realm-scoped account '$self' is invalid (" . $fnret->msg . ")");
-
-        # $potentialSelf is valid, we can use it
-        $self = $potentialSelf;
-    }
-    else {
-        main_exit(OVH::Bastion::EXIT_ACCOUNT_INVALID,
-            "account_invalid", "Attempted to use a realm account but not from another bastion");
-    }
-}
-else {
-=cut
-
-# non-realm case
-$fnret = $Self->isExisting();
+# check for account existence and validity
+$fnret = $Self->check();
 if (!$fnret) {
     main_exit(OVH::Bastion::EXIT_ACCOUNT_INVALID, "account_invalid", "The account is invalid (" . $fnret->msg . ")");
 }

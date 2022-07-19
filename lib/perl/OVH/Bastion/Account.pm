@@ -2,8 +2,9 @@ package OVH::Bastion::Account;
 use common::sense;
 
 use Hash::Util qw{ lock_hashref lock_hashref_recurse unlock_hashref unlock_hashref_recurse lock_ref_value unlock_ref_value };
-use List::Util qw{ any };
+use List::Util qw{ any none };
 use Memoize;
+use Cwd; # getcwd
 
 use OVH::Bastion;
 use OVH::Result;
@@ -13,41 +14,58 @@ use OVH::Result;
 # hence the name ->refresh()
 sub refresh {
     my $this = shift;
-    return newFromName(__PACKAGE__, $this->name);
+    return $this->newFromName(name => $this->name);
 }
 
 # FIXME double-check that memoize works at the instance level, aka 1 hashcache per instance!!
 
 sub newFromEnv {
-    return newFromName(__PACKAGE__, OVH::Bastion::get_user_from_env()->value);
+    my ($this, %p) = @_;
+    $p{'name'} = OVH::Bastion::get_user_from_env()->value;
+    return $this->newFromName(%p);
 }
 
 memoize('newInvalid');
 sub newInvalid {
-    return newFromName(__PACKAGE__, '<none>');
+    my ($this, %p) = @_;
+    $p{'name'} = '<none>';
+    return $this->newFromName(%p);
 }
 
 # $name can be "joe" or "realm/joe"
 sub newFromName {
-    my $objectType = shift;
-    my $name = shift;
+    my objectType = shift;
+    my %params;
+
+    # can be used as:
+    # - newFromName("thename");
+    # - newFromName(name => "thename", option1 => "value1", ...);
+    if (@_ == 1) {
+        $params{'name'} = shift;
+    }
+    else {
+        %params = @_;
+    }
 
     # FIXME it means we can't newFromName() an account that is INVALID but EXISTING. is this a problem?
-    my $fnret = _new_from_name(name => $name);
-    # return R('OK', value => {sysaccount => "realm_$1", realm => $1,    remoteaccount => $2,    account => "$1/$2"}); # untainted
-    # return R('OK', value => {sysaccount => $1,         realm => undef, remoteaccount => undef, account => $1});  # untainted
+    my $fnret = _new_from_name(%params);
     $fnret or return $fnret;
+    # we have either:
+    # R('OK', value => {sysaccount => "realm_$1", realm => $1,    remoteaccount => $2,    account => "$1/$2"});
+    # R('OK', value => {sysaccount => $1,         realm => undef, remoteaccount => undef, account => $1});
 
     my $Account = {
-        name       => $fnret->value->{'account'},           # joe or realmname/joe
-        sysName    => $fnret->value->{'sysaccount'}, # joe or realm_nameoftherealm
-        remoteName => $fnret->value->{'remoteaccount'},
-        realm      => $fnret->value->{'realm'},
-        type       => $fnret->value->{'type'},
-        uid        => undef, # set in JIT by isExisting()
-        gid        => undef, # set in JIT by isExisting()
-        home       => undef, # set in JIT by isExisting()
-        allowkeeperHome => '/home/allowkeeper/'.$fnret->value->{'account'},
+        name       => $fnret->value->{'account'},           # joe   or acme/joe
+        sysName    => $fnret->value->{'sysaccount'},        # joe   or realm_acme
+        remoteName => $fnret->value->{'remoteaccount'},     # undef or joe
+        realm      => $fnret->value->{'realm'},             # undef or acme
+        allowkeeperHome => '/home/allowkeeper/'.$fnret->value->{'sysaccount'},
+        # an Account instance may or may not actually exist on the system, until
+        # ->isExisting() is called. If the account does exist, said func will
+        # set the following params:
+        uid        => undef,
+        gid        => undef,
+        home       => undef, # FIXME shall we force /home/$sysaccount here? and yell in isExisting if passwd disagrees?
     };
 
     bless $Account, 'OVH::Bastion::Account';
@@ -111,15 +129,12 @@ sub allowkeeperHome {
 
 memoize('getConfig');
 sub getConfig {
-    my ($this, %params) = @_;
-    my $compositeKey = $params{'key'};
-    my $fnret;
+    my ($this, $compositeKey, %p) = @_;
 
-    if (!$compositeKey) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing required parameter 'key'");
-    }
+    my $fnret = OVH::Bastion::check_args(\%p);
+    $fnret or return $fnret;
 
-    my ($type, $key) = $compositeKey =~ m{^(private|public)/([a-zA-Z0-9_-]+)$});
+    my ($type, $key) = $compositeKey =~ m{^(private|public)/([a-zA-Z0-9_-]+)$};
     if (!$type || !$key) {
         return R('ERR_INVALID_PARAMETER', msg => "Invalid configuration key asked ($compositeKey)");
     }
@@ -164,24 +179,24 @@ sub isActive {
     # If in alwaysActive, then is active
     my $alwaysActiveAccounts = OVH::Bastion::config('alwaysActiveAccounts');
     if ($alwaysActiveAccounts and $alwaysActiveAccounts->value) {
-        if (grep { $this->sysUser eq $_ } @{$alwaysActiveAccounts->value}) {
+        if (any { $this->sysUser eq $_ } @{$alwaysActiveAccounts->value}) {
             return R('OK');
         }
     }
 
     # If account has the flag in public config, then is active
-    if ($this->getConfig('public/always_active')) {
+    if ($this->getConfig('public/always_active')->value eq 'yes') {
         return R('OK');
     }
 
     if (!-r -x $checkProgram) {
-        warn_syslog("Configured check program '$checkProgram' doesn't exist or is not readable+executable");
+        OVH::Bastion::warn_syslog("Configured check program '$checkProgram' doesn't exist or is not readable+executable");
         return R('ERR_INTERNAL', msg => "The account activeness check program doesn't exist. Report this to sysadmin!");
     }
 
-    $fnret = OVH::Bastion::execute(cmd => [$checkProgram, $this->sysUser]);
+    $fnret = OVH::Bastion::execute(cmd => [$checkProgram, $this->sysName]);
     if (!$fnret) {
-        warn_syslog("Failed to execute program '$checkProgram': " . $fnret->msg);
+        OVH::Bastion::warn_syslog("Failed to execute program '$checkProgram': " . $fnret->msg);
         return $this->_cache(R('ERR_INTERNAL', msg => "The account activeness check program failed. Report this to sysadmin!"));
     }
 
@@ -198,19 +213,19 @@ sub isActive {
     }
     if ($fnret->value->{'status'} == 3) {
         if (!$fnret->value->{'stderr'}) {
-            warn_syslog("External account validation program returned status 2 (empty stderr)");
+            OVH::Bastion::warn_syslog("External account validation program returned status 2 (empty stderr)");
         }
         else {
-            warn_syslog("External account validation program returned status 2: " . $_)
+            OVH::Bastion::warn_syslog("External account validation program returned status 2: " . $_)
               for @{$fnret->value->{'stderr'} || []};
         }
     }
     if ($fnret->value->{'status'} == 4) {
         if (!$fnret->value->{'stderr'}) {
-            osh_warn("External account validation program returned status 2 (empty stderr)");
+            OVH::Bastion::osh_warn("External account validation program returned status 2 (empty stderr)");
         }
         else {
-            osh_warn("External account validation program returned status 2: " . $_)
+            OVH::Bastion::osh_warn("External account validation program returned status 2: " . $_)
               for @{$fnret->value->{'stderr'} || []};
         }
     }
@@ -232,7 +247,7 @@ sub isTTLNotExpired {
     if ($fnret) {
         my $ttl = $fnret->value;
         if ($ttl !~ /^[0-9]+$/) {
-            warn_syslog("Invalid TTL value '$ttl' for account '".$this->name."', denying access");
+            OVH::Bastion::warn_syslog("Invalid TTL value '$ttl' for account '".$this->name."', denying access");
             return R('ERR_INVALID_TTL',
                 msg => "Issue with your account TTL configuration, access denied. "
                   . "Please check with an administrator");
@@ -241,7 +256,7 @@ sub isTTLNotExpired {
         $fnret = $this->getConfig('private/creation_timestamp');
         my $created = $fnret->value;
         if ($created !~ /^[0-9]+$/) {
-            warn_syslog("Invalid account creation time '$created' for account '".$this->name."', denying access");
+            OVH::Bastion::warn_syslog("Invalid account creation time '$created' for account '".$this->name."', denying access");
             return R('ERR_INVALID_TTL',
                 msg => "Issue with your account TTL configuration, access denied. "
                   . "Please check with an administrator");
@@ -290,7 +305,7 @@ sub isNotExpired {
     if (-e $filepath) {
         $isFirstLogin = 0;
         $lastlog      = (stat(_))[9];
-        osh_debug("is_account_nonexpired: got lastlog date: $lastlog");
+        OVH::Bastion::osh_debug("is_account_nonexpired: got lastlog date: $lastlog");
 
         # if lastlog file is available, fetch some info from it
         if (open(my $lastloginfh, "<", $filepath)) {
@@ -303,7 +318,7 @@ sub isNotExpired {
     else {
         my ($previousDir) = getcwd() =~ m{^(/[a-z0-9_./-]+)}i;
         if (!chdir("/home/".$this->sysName)) {
-            osh_debug("is_account_nonexpired: no exec access to the folder!");
+            OVH::Bastion::osh_debug("is_account_nonexpired: no exec access to the folder!");
             return R('ERR_NO_ACCESS', msg => "No read access to this account folder to compute last login time");
         }
         chdir($previousDir);
@@ -313,18 +328,18 @@ sub isNotExpired {
         $fnret = $this->getConfig('private/creation_timestamp');
         if ($fnret && $fnret->value) {
             $lastlog = $fnret->value;
-            osh_debug("is_account_nonexpired: got creation date from config.creation_timestamp: $lastlog");
+            OVH::Bastion::osh_debug("is_account_nonexpired: got creation date from config.creation_timestamp: $lastlog");
         }
         elsif (-e sprintf("/home/%s/accountCreate.comment", $this->sysName)) {
 
             # fall back to the stat of the accountCreate.comment file
             $lastlog = (stat(_))[9];
-            osh_debug("is_account_nonexpired: got creation date from accountCreate.comment stat: $lastlog");
+            OVH::Bastion::osh_debug("is_account_nonexpired: got creation date from accountCreate.comment stat: $lastlog");
         }
         else {
             # last fall back to the stat of the ttyrec/ folder
             $lastlog = (stat(sprintf("/home/%s/ttyrec", $this->sysName)))[9];
-            osh_debug("is_account_nonexpired: got creation date from ttyrec/ stat: $lastlog");
+            OVH::Bastion::osh_debug("is_account_nonexpired: got creation date from ttyrec/ stat: $lastlog");
         }
     }
 
@@ -333,7 +348,7 @@ sub isNotExpired {
     $value->{'days'}                = $days;
     $value->{'seconds'}             = $seconds;
     $value->{'already_seen_before'} = !$isFirstLogin;
-    osh_debug("Last account activity: $days days ago");
+    OVH::Bastion::osh_debug("Last account activity: $days days ago");
 
     if ($accountMaxInactiveDays == 0) {
 
@@ -435,30 +450,54 @@ sub check {
     return R('OK');
 }
 
-# check if account name is valid, i.e. non-weird chars and non reserved parts
-#memoize('isValid');
+# return R('OK', value => {sysaccount => "realm_$1", realm => $1,    remoteaccount => $2,    account => "$1/$2"}); # untainted
+# return R('OK', value => {sysaccount => $1,         realm => undef, remoteaccount => undef, account => $1});  # untainted
 sub _new_from_name {
-    my %params  = @_;
-    my $name = $params{'name'};
-    my $accountType = $params{'accountType'} || 'normal'; # normal (local account or $realm/$remoteself formatted account) | group (must start with key*) | realm (must start with realm_*)
-    my $localOnly   = $params{'localOnly'};               # for accountType == normal, disallow realm-formatted accounts ($realm/$remoteself)
-    my $realmOnly   = $params{'realmOnly'};               # for accountType == normal, allow only realm-formatted accounts ($realm/$remoteself)
+    my %p = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ name }],
+        optional => [qw{ type }]
+    );
+    $fnret or return $fnret;
 
-    # FIXME
-    die if $accountType ne 'normal';
-    die if $localOnly;
-    die if $realmOnly;
+    my $name = $p{'name'};
+    my $type = $p{'type'} || 'regular';
+    # - local: disallow realm-formatted accounts aka $realm/$remoteself
+    # - remote: allow only realm-formatted accounts aka $realm/$remoteself
+    # - regular: either a local or remote account (autodetect and allow both)
+    # - realm: a realm support account, must start with realm_*
+    # - incoming: either a local account or a realm account, in which case we'll autodetect
+    #             the remote account (through LC_BASTION) and setup accordingly. If we don't find a remote account
+    #             and we have a realm account, deny it (return an error). Mainly used to create an Account instance
+    #             from an ingress connection information.
+    # - group: system user with the same uid than a bastion group's gid, must start with key*
+    #        FIXME: type=group is actually not an ::Account and shouldn't be there
 
-    my $whatis = ($accountType eq 'realm' ? "Realm" : "Account");
 
-    if (!defined($name)) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing 'name' parameter");
+    # if both types are allowed, resolve whether it looks like a local or remote account
+    # so that the proper tests are done in the rest of the func
+    if ($type eq 'regular') {
+        $type = ($name =~ m{/} ? 'remote' : 'local');
     }
-    if ($localOnly && $name =~ m{/}) {
+    my $whatis = ($type eq 'remote' ? "Realm" : "Account");
+
+    if ($name =~ m{/} && $type ne 'remote') {
         return R('KO_REALM_FORBIDDEN', msg => "$whatis name must not contain any '/'");
     }
-    elsif ($realmOnly && $name !~ m{/}) {
+    elsif ($name !~ m{/} && $type eq 'remote') {
         return R('KO_LOCAL_FORBIDDEN', msg => "$whatis name must contain a '/'");
+    }
+    elsif ($name =~ m/^key/i && $type ne 'group') {
+        return R('KO_FORBIDDEN_PREFIX', msg => "$whatis name contains an unauthorized key prefix");
+    }
+    elsif ($name !~ m/^key/i && $type eq 'group') {
+        return R('KO_BAD_PREFIX', msg => "$whatis should start with the group prefix");
+    }
+    elsif ($name =~ m/^realm_/ && $type ne 'realm') {
+        return R('KO_FORBIDDEN_PREFIX', msg => "$whatis name contains an unauthorized realm prefix");
+    }
+    elsif ($name !~ m/^realm_/ && $type eq 'realm') {
+        return R('KO_BAD_PREFIX', msg => "$whatis should start with the realm prefix");
     }
     elsif ($name =~ m/^[-.]/) {
         return R('KO_FORBIDDEN_PREFIX', msg => "$whatis name must not start with a '-' nor a '.'");
@@ -466,22 +505,10 @@ sub _new_from_name {
     elsif ($name =~ m/-tty$/i) {
         return R('KO_FORBIDDEN_SUFFIX', msg => "$whatis name contains an unauthorized suffix");
     }
-    elsif ($name =~ m/^key/i && $accountType ne 'group') {
-        return R('KO_FORBIDDEN_PREFIX', msg => "$whatis name contains an unauthorized key prefix");
-    }
-    elsif ($name !~ m/^key/i && $accountType eq 'group') {
-        return R('KO_BAD_PREFIX', msg => "$whatis should start with the group prefix");
-    }
-    elsif ($name =~ m/^realm_/ && $accountType ne 'realm') {
-        return R('KO_FORBIDDEN_PREFIX', msg => "$whatis name contains an unauthorized realm prefix");
-    }
-    elsif ($name !~ m/^realm_/ && $accountType eq 'realm') {
-        return R('KO_BAD_PREFIX', msg => "$whatis should start with the realm prefix");
-    }
     elsif (grep { $name eq $_ } qw{ root proxyhttp keykeeper passkeeper logkeeper realm realm_realm }) {
         return R('KO_FORBIDDEN_NAME', msg => "$whatis name is reserved");
     }
-    elsif ($name =~ m{^([a-zA-Z0-9-]+)/([a-zA-Z0-9._-]+)$} && $accountType eq 'normal') {
+    elsif ($name =~ m{^([a-zA-Z0-9-]+)/([a-zA-Z0-9._-]+)$} && $type eq 'remote') {
 
         # 32 is the max Linux user length
         if (length("realm_$1") > 32) {
@@ -501,15 +528,39 @@ sub _new_from_name {
         return R('OK', value => {sysaccount => "realm_$1", realm => $1, remoteaccount => $2, account => "$1/$2", type => 'realm'}); # untainted
     }
     elsif ($name =~ m/^([a-zA-Z0-9._-]+)$/) {
-        if (length($1) < 2) {
-            return R('KO_TOO_SMALL', msg => "$whatis name is too small, length($1) < 2");
+        $name = $1; # untaint
+
+        if (length($name) < 2) {
+            return R('KO_TOO_SMALL', msg => "$whatis name is too small, length($name) < 2");
         }
 
         # 28 because all accounts have a corresponding "-tty" group, and 32 - length(-tty) == 28
-        elsif (length($1) > 28) {
-            return R('KO_TOO_LONG', msg => "$whatis name is too long, length($1) > 28");
+        elsif (length($name) > 28) {
+            return R('KO_TOO_LONG', msg => "$whatis name is too long, length($name) > 28");
         }
-        return R('OK', value => {sysaccount => $1, realm => undef, remoteaccount => undef, account => $1, type => 'local'});  # untainted
+
+        if ($type eq 'incoming' && $name =~ /realm_(.+)$/) {
+            # if we have an account starting with realm_, in this case our caller wants us to find the correspoding
+            # remote account, and fail if we don't
+            my $remoteAccountRealm = $1;
+            if (length($remoteAccountRealm) < 2) {
+                return R('KO_TOO_SMALL', msg => "$whatis remote account realm name is too small, length($remoteAccountRealm) < 2");
+            }
+
+            if ($ENV{'LC_BASTION'}) {
+                my $remoteAccountName = $ENV{'LC_BASTION'};
+                if (length($remoteAccountName) < 2) {
+                    return R('KO_TOO_SMALL', msg => "$whatis remote account name is too small, length($remoteAccountRealm) < 2");
+                }
+                my $remoteAccount = sprintf("%s/%s", $remoteAccountRealm, $remoteAccountName);
+                return _new_from_name(name => $remoteAccount, type => "remote");
+            }
+            else {
+                return R('KO_INVALID_ACCOUNT', msg => "Attempted to use a realm account but not from another bastion");
+            }
+        }
+
+        return R('OK', value => {sysaccount => $name, realm => undef, remoteaccount => undef, account => $name, type => 'local'});  # untainted
     }
     else {
         return R('KO_FORBIDDEN_CHARS', msg => "$whatis name '$name' contains forbidden characters");
@@ -517,46 +568,36 @@ sub _new_from_name {
     return R('ERR_IMPOSSIBLE_CASE');
 }
 
+sub _has_role {
+    my ($this, $role, $configList, $sysGroup) = @_;
+
+    my $fnret = $this->isExisting();
+    $fnret or return $fnret;
+
+    if (OVH::Bastion::is_user_in_group(group => $sysGroup, user => $this->name)) {
+        if (!$configList || any { $this->name eq $_ } @{ OVH::Bastion::config($configList)->value || [] }) {
+            return R('OK', msg => "Account ".$this->name." is a bastion $role");
+        }
+    }
+    return R('KO_ACCESS_DENIED', msg => "Account ".$this->name." is not a bastion $role");
+}
+
 memoize('isAdmin');
-sub isAdmin {
-    my $this = shift;
-
-    my $fnret = $this->isExisting();
-    $fnret or return $fnret;
-
-    my $adminList = OVH::Bastion::config('adminAccounts')->value();
-    if (any { $this->name eq $_ } @$adminList) {
-        if (OVH::Bastion::is_user_in_group(group => "osh-admin", user => $this->name)) {
-            return R('OK', msg => "Account ".$this->name." is a bastion administrator");
-        }
-    }
-    return R('KO_ACCESS_DENIED', msg => "Account ".$this->name." is not a bastion administrator");
-}
-
+sub isAdmin      { my $this = shift; return $this->_has_role("administrator", "adminAccounts", "osh-admin"); }
 memoize('isSuperOwner');
-sub isSuperOwner {
-    my $this = shift;
-
-    my $fnret = $this->isExisting();
-    $fnret or return $fnret;
-
-    my $superOwnerList = OVH::Bastion::config('adminAccounts')->value();
-    if (any { $this->name eq $_ } @$superOwnerList) {
-        if (OVH::Bastion::is_user_in_group(group => "osh-superowner", user => $this->name)) {
-            return R('OK', msg => "Account ".$this->name." is a bastion superowner");
-        }
-    }
-    return R('KO_ACCESS_DENIED', msg => "Account ".$this->name." is not a bastion superowner");
-}
+sub isSuperOwner { my $this = shift; return $this->_has_role("superowner", "superOwnerAccounts", "osh-superowner") || $this->isAdmin; }
+memoize('isAuditor');
+sub isAuditor    { my $this = shift; return $this->_has_role("auditor", undef, "osh-auditor"); }
 
 # return a hash with keys being the bastion group names and as values,
 # a hash of relations to this account, i.e. member, guest, aclkeeper,
 # gatekeeper, owner.
 memoize('getGroups');
 sub getGroups {
-    my ($this, %params) = @_;
-    my $cache = $params{'cache'}; # allow use of sys_getgr_all's cache
-    my $fnret;
+    my ($this, %p) = @_;
+
+    my $fnret = OVH::Bastion::check_args(\%p, optionalFalseOk => qw{ cache });
+    my $cache = $p{'cache'}; # allow use of sys_getgr_all's cache
 
     $this->isExisting() or return;
 
@@ -571,7 +612,7 @@ sub getGroups {
     my %result;
     foreach my $sysgroup (keys %{$fnret->value}) {
         # we must be a member of this sysgroup
-        next if !(any { $this->sysName eq $_ } @{ $fnret->value->{$sysgroup}->{'members'} });
+        next if (none { $this->sysName eq $_ } @{ $fnret->value->{$sysgroup}->{'members'} });
 
         ## no critic(RegularExpressions::ProhibitUnusedCapture) # false positive
         if ($sysgroup =~ /^key(?<groupname>.+?)(-(?<type>gatekeeper|aclkeeper|owner))?$/) {
@@ -647,8 +688,6 @@ sub canExecutePlugin {
     {
 
         # need to parse group to see if maybe member of group-gatekeeper or group-owner (or super owner)
-        my %canDo = (gatekeeper => 0, aclkeeper => 0, owner => 0);
-
         $fnret = $this->getGroups();
         $fnret or return $fnret;
 
@@ -658,7 +697,7 @@ sub canExecutePlugin {
             if (-f "$path_plugin/group-$type/$plugin") {
 
                 # we can always execute these commands if we are a super owner
-                my $canDo = !!$this->isSuperOwner()+0;
+                my $canDo = $this->isSuperOwner ? 1 : 0;
 
                 # or if we are $type on at least one group
                 $canDo++ if (any { $_->{$type} } values %groups);

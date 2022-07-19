@@ -71,6 +71,6 @@ if (not defined $self) {
         HEXIT('ERR_SUDO_NEEDED', msg => 'This command must be run under sudo');
     }
 }
-$Self = OVH::Bastion::Account->newFromName(name => $self);
+$Self = OVH::Bastion::Account->newFromName($self);
 
 1;

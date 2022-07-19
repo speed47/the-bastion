@@ -860,7 +860,7 @@ sub is_admin {
     my $cache   = $params{'cache'};     # allow cache use of sys_getgr_name() through is_user_in_group()
 
     if ($account) {
-        Carp::confess "FIXME use Account::isAdmin()";    # FIXME
+        ;                               #Carp::confess "FIXME use Account::isAdmin()";    # FIXME
     }
 
     $account = $sudo ? $ENV{'SUDO_USER'} : OVH::Bastion::get_user_from_env()->value;

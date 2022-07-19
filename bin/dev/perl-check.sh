@@ -5,7 +5,7 @@ basedir=$(readlink -f "$(dirname "$0")"/../..)
 # shellcheck source=lib/shell/functions.inc
 . "$basedir"/lib/shell/functions.inc
 
-cmdline='-Mstrict -Mwarnings'
+cmdline="-Mstrict -Mwarnings -I$basedir/lib/perl"
 (( fails=0 ))
 action_doing "Checking perl files syntax"
 for i in $(find "$basedir"/bin -type f ! -name "*.orig") $(find "$basedir"/lib/perl -type f -name "*.pm") $(find "$basedir"/lib/perl -type f -name "*.inc")

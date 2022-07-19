@@ -39,7 +39,7 @@ if (not $sudoAs or not $sudoCmd) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing mandatory parameter 'sudo-as' or 'sudo-cmd'";
 }
 
-my $AccountSudoAs = OVH::Bastion::Account->newFromName(name => $sudoAs);
+my $AccountSudoAs = OVH::Bastion::Account->newFromName($sudoAs);
 $AccountSudoAs or osh_exit($AccountSudoAs);
 
 $fnret = $AccountSudoAs->isExisting();

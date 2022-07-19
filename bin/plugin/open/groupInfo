@@ -151,7 +151,8 @@ if (   OVH::Bastion::is_group_owner(group => $shortGroup, account => $self, supe
 
     my @inactive;
     foreach my $account (@members) {
-        if (OVH::Bastion::is_account_active(account => $account)->is_ko) {
+        my $Account = OVH::Bastion::Account->newFromName($account);
+        if ($Account && $Account->isExisting && $Account->isActive->is_ko) {
             push @inactive, $account;
         }
     }

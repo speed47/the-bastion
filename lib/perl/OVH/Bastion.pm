@@ -4,6 +4,7 @@ package OVH::Bastion;
 use common::sense;
 use Fcntl;
 use POSIX qw(strftime);
+use List::Util qw{ any };
 
 use OVH::Bastion::Account;
 
@@ -877,6 +878,66 @@ sub can_use_utf8 {
 
     # only use UTF-8 if user LANG seems to support it, and if TERM is defined and not dumb
     return ($ENV{'LANG'} && ($ENV{'LANG'} =~ /utf-?8/i) && $ENV{'TERM'} && $ENV{'TERM'} !~ /dumb|unknown/i);
+}
+
+sub check_args {
+    my ($args, %p) = @_;
+    my $mandatory        = $p{'mandatory'}        || [];
+    my $mandatoryFalseOk = $p{'mandatoryFalseOk'} || [];
+    my $optional         = $p{'optional'}         || [];
+    my $optionalFalseOk  = $p{'optionalFalseOk'}  || [];
+    my $unknownOk        = $p{'unknownOk'};
+
+    # if this hash is not empty at the end of this func, mandatory keys are missing
+    my %unseenMandatory = map { $_ => 1 } (@$mandatory, @$mandatoryFalseOk);
+
+    # if these arrays are not empty at the end of this func, our caller has a problem
+    my @errorUnknown;
+    my @errorMissing;
+
+    my $caller1 = (caller(1))[3];
+    my $caller2 = (caller(2))[3];
+    if ($caller2 eq 'Memoize::_memoizer') {
+        $caller2 = (caller(4))[3];
+    }
+
+    foreach my $key (keys %$args) {
+        # we've seen this key, drop it from the keys-that-are-yet-to-be-seen
+        delete $unseenMandatory{$key};
+
+        if (!$unknownOk && !any { $key eq $_ } (@$optional, @$mandatory)) {
+            # this key is unknown, and it's not ok to be unknown
+            warn_syslog(
+                sprintf(
+                    "check_args: function '%s' called by '%s' with the unknown parameter '%s'",
+                    $caller1, $caller2, $key
+                )
+            );
+            push @errorUnknown, $key;
+        }
+        if (!$args->{$key} && !any { $key eq $_ } (@$mandatoryFalseOk, @$optionalFalseOk)) {
+            # this key exists but its value is false (empty/undef/0), and it's not ok to be false
+            warn_syslog(
+                sprintf(
+                    "check_args: function '%s' called by '%s' with a false value for '%s'",
+                    $caller1, $caller2, $key
+                )
+            );
+            push @errorMissing, $key;
+        }
+    }
+
+    # all the unseen keys are problematic at this stage
+    push @errorMissing, keys %unseenMandatory;
+    warn_syslog(
+        sprintf(
+            "check_args: function '%s' called by '%s' without the mandatory parameter '%s'", $caller1, $caller2, $_
+        )
+    ) for @errorMissing;
+
+    return R('OK') if (!@errorUnknown && !@errorMissing);
+    return R('ERR_MISSING_ARGUMENT', msg => "Missing arguments: @errorMissing") if @errorMissing;
+    return R('ERR_UNKNOWN_ARGUMENT', msg => "Unknown arguments: @errorUnknown") if @errorUnknown;
 }
 
 1;

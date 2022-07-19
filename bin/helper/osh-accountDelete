@@ -80,12 +80,19 @@ osh_debug("Checking account");
 $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, accountType => $type);
 $fnret or HEXIT($fnret);
 
-# get returned untainted value
-$account = $fnret->value->{'account'};
+my $Account = OVH::Bastion::Account->newFromName($account);    # FIXME accounttype?
+$Account or HEXIT($Account);
+
+$fnret = $Account->isExisting();
+$fnret or HEXIT($fnret);
+
+$account = $Account->name;                                     # untainted
+
+# FIXME what if we get an account = realm/user?
 
 #>CODE
 # don't allow a non-admin deleting an admin
-if (OVH::Bastion::is_admin(account => $account, sudo => 1) && !OVH::Bastion::is_admin(account => $self, sudo => 1)) {
+if ($Account->isAdmin && !$Self->isAdmin) {
     HEXIT('ERR_SECURITY_VIOLATION', msg => "You can't delete an admin without being admin yourself");
 }
 
@@ -108,7 +115,7 @@ if ((getpwnam($account))[8] !~ m{/osh\.pl$}) {
 
 # kill all user processes, if any
 # GNU and BSD compliant
-$fnret = OVH::Bastion::execute(cmd => ['ps', '-U', $account, '-o', 'pid'], noisy_stderr => 1);
+$fnret = OVH::Bastion::execute(cmd => ['ps', '-U', $Account->sysName, '-o', 'pid'], noisy_stderr => 1);
 if ($fnret->err ne 'OK' || ref $fnret->value->{'stdout'} ne 'ARRAY') {
     ;    # don't warn, we can get an return code of 1 just because there are no processes matching
 }

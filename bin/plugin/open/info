@@ -38,15 +38,15 @@ if ($realm) {
     osh_info "You are a citizen of a distant realm named " . colored($realm, 'green');
     $ret{'realm'} = $realm;
 }
-if (OVH::Bastion::is_auditor(account => $self)) {
+if ($Self->isAuditor) {
     $ret{'is_auditor'} = 1;
     osh_info "You are a " . colored('bastion auditor!', 'green');
 }
-if (OVH::Bastion::is_super_owner(account => $self)) {
+if ($Self->isSuperOwner) {
     $ret{'is_superowner'} = 1;
     osh_info "Look at you, you are a " . colored('bastion superowner!', 'green');
 }
-if (OVH::Bastion::is_admin(account => $self)) {
+if ($Self->isAdmin) {
     $ret{'is_admin'} = 1;
     osh_info "Woosh, you are even a " . colored('bastion admin!', 'green');
 }
@@ -269,7 +269,7 @@ osh_info "- The Multi-Factor Authentication (MFA) policy is "
 osh_info "- The PIV-enforced ingress keys policy is "
   . colored($config->{'ingressRequirePIV'} ? 'ENABLED' : 'DISABLED', $config->{'ingressRequirePIV'} ? 'red' : 'green');
 
-if (OVH::Bastion::is_admin(account => $self)) {
+if ($Self->isAdmin) {
     osh_info "\nAs you are a bastion admin, more information follows:";
     $fnret = OVH::Bastion::sysinfo();
     if ($fnret and $fnret->value) {
