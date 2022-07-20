@@ -131,7 +131,7 @@ while ($i < scalar @knownPlugins) {
         my $curLen;
         my $curIndex;
         foreach my $cmd (@plugins) {
-            $fnret = $Self->canExecutePlugin(plugin => $cmd);
+            $fnret = $Self->canExecutePlugin($cmd);
             next unless $fnret;
             if (($curLen + length($fnret->value->{'plugin'})) > 80) {
                 $curIndex++;

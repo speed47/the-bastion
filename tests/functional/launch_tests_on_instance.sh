@@ -125,6 +125,12 @@ account0="$4"
 user_ssh_key_path="$5"
 root_ssh_key_path="$6"
 
+if [ "$opt_skip_consistency_check" = 1 ]; then
+    consistency_check_cmd="/bin/true"
+else
+    consistency_check_cmd="/opt/bastion/bin/admin/check-consistency.pl"
+fi
+
 # does ssh work there ?
 server_output=$(echo test | nc -w 1 $remote_ip $remote_port)
 if echo "$server_output" | grep -q ^SSH-2 ; then
@@ -296,6 +302,8 @@ prefix()
     fi
 }
 
+_bad='at /usr/share/perl|compilation error|compilation aborted|BEGIN failed|gonna crash|/opt/bastion/|sudo:|anyway|MAKETESTFAIL'
+_badexclude='/etc/shells'
 run()
 {
     # display verbose output about the previous test if it was bad
@@ -310,10 +318,8 @@ run()
         cat "$outdir/$basename.log"
         printf "%b%b%b\\n" "$WHITE_ON_BLUE" "[INFO] returned json follows" "$NOC"
         grep "^JSON_OUTPUT=" -- $outdir/$basename.log | cut -d= -f2- | jq --sort-keys .
-        if [ "$opt_skip_consistency_check" != 1 ]; then
-            printf "%b%b%b\\n" "$WHITE_ON_BLUE" "[INFO] consistency check follows" "$NOC"
-            cat "$outdir/$basename.cc"
-        fi
+        printf "%b%b%b\\n" "$WHITE_ON_BLUE" "[INFO] consistency check follows" "$NOC"
+        cat "$outdir/$basename.cc"
         if test -t 0 && [ "$opt_no_pause_on_fail" != 1 ]; then
             printf "%b%b%b\\n" "$WHITE_ON_BLUE" "[INFO] press enter to continue" "$NOC"
             read -r _
@@ -325,12 +331,11 @@ run()
     testno=$(( testno + 1 ))
     [ "$COUNTONLY" = 1 ] && return
     name="$modulename"
-    if [ -z "$name" ]; then
-        name="main"
-    fi
+    : ${name:-main}
     case="$1"
     shift
-    basename=$(printf '%04d-%s-%s' $testno $name $case | sed -re "s=/=_=g")
+    basename=$(printf '%04d-%s-%s' $testno $name $case)
+    basename=${basename//\//_}
 
     # if we're about to run a script, keep a copy there
     if [ -x "$1" ] && [ "$#" -eq 1 ]; then
@@ -350,35 +355,32 @@ run()
     flock "$outdir/$basename.retval" true
 
     # look for generally bad strings in the output
-    _bad='at /usr/share/perl|compilation error|compilation aborted|BEGIN failed|gonna crash|/opt/bastion/|sudo:|ontinuing anyway|MAKETESTFAIL'
-    _badexclude='/etc/shells'
-    # shellcheck disable=SC2126
-    if [ "$(grep -qE "$_bad" $outdir/$basename.log | grep -Ev "$_badexclude" | wc -l)" -gt 0 ]; then
+    # shellcheck disable=SC2126,SC2143
+    if [ -n "$(grep -qE "$_bad" $outdir/$basename.log | grep -Ev "$_badexclude")" ]; then
         nbfailedgeneric=$(( nbfailedgeneric + 1 ))
         fail "BAD STRING" "(generic known-bad string found in output)"
     fi
 
-    # now run consistency check on the target, unless configured otherwise
-    if [ "$opt_skip_consistency_check" != 1 ]; then
-        flock "$outdir/$basename.retval" $screen "$outdir/$basename.cc" -D -m -fn -ln $r0 '
-                /opt/bastion/bin/admin/check-consistency.pl ; echo _RETVAL_CC=$?= ;
-                grep -Fw -e warn -e die -e code-warning /var/log/bastion/bastion.log | grep -Fv "'"${code_warn_exclude:-__none__}"'" | sed "s/^/_SYSLOG=/" ;
-                : > /var/log/bastion/bastion.log
-            '
-        flock "$outdir/$basename.retval" true
-        ccret=$(     grep _RETVAL_CC= "$outdir/$basename.cc" | cut -d= -f2)
-        syslogline=$(grep _SYSLOG=    "$outdir/$basename.cc" | cut -d= -f2-)
-        if [ "$ccret" != 0 ]; then
-            nbfailedcon=$(( nbfailedcon + 1 ))
-            fail "CONSISTENCY CHECK"
-        fi
-        if [ -n "$syslogline" ]; then
-            nbfailedlog=$(( nbfailedlog + 1 ))
-            fail "WARN/DIE/CODE-WARN TRIGGERED"
-        fi
-        # reset this for the next test
-        unset code_warn_exclude
+    # now run consistency check on the target (which may just be /bin/true if skipped,
+    # and also collect warn_syslog messages
+    flock "$outdir/$basename.retval" $screen "$outdir/$basename.cc" -D -m -fn -ln $r0 '
+            '"$consistency_check_cmd"' ; echo _RETVAL_CC=$?= ;
+            grep -Fw -e warn -e die -e code-warning /var/log/bastion/bastion.log | grep -Fv "'"${code_warn_exclude:-__none__}"'" | sed "s/^/_SYSLOG=/" ;
+            : > /var/log/bastion/bastion.log
+        '
+    flock "$outdir/$basename.retval" true
+    ccret=$(     grep _RETVAL_CC= "$outdir/$basename.cc" | cut -d= -f2)
+    syslogline=$(grep _SYSLOG=    "$outdir/$basename.cc" | cut -d= -f2-)
+    if [ "$ccret" != 0 ]; then
+        nbfailedcon=$(( nbfailedcon + 1 ))
+        fail "CONSISTENCY CHECK"
     fi
+    if [ -n "$syslogline" ]; then
+        nbfailedlog=$(( nbfailedlog + 1 ))
+        fail "WARN/DIE/CODE-WARN TRIGGERED"
+    fi
+    # reset this for the next test
+    unset code_warn_exclude
 }
 
 script() {

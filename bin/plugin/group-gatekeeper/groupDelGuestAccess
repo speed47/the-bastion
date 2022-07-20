@@ -70,7 +70,7 @@ my $fnret = OVH::Bastion::Plugin::groupSetRole::act(
     account        => $account,
     group          => $group,
     action         => 'del',
-    type           => 'guest',
+    role           => 'guest',
     user           => $realUser,
     userAny        => $userAny,
     port           => $port,
@@ -78,7 +78,7 @@ my $fnret = OVH::Bastion::Plugin::groupSetRole::act(
     host           => ($ip || $host),
     sudo           => 0,
     silentoverride => 0,
-    self           => $self,
+    Self           => $Self,
     scriptName     => $scriptName,
     savedArgs      => $savedArgs
 );

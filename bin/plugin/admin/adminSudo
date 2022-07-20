@@ -45,7 +45,7 @@ $AccountSudoAs or osh_exit($AccountSudoAs);
 $fnret = $AccountSudoAs->isExisting();
 $fnret or osh_exit($fnret);
 
-$fnret = $AccountSudoAs->canExecutePlugin(plugin => $sudoCmd);
+$fnret = $AccountSudoAs->canExecutePlugin($sudoCmd);
 $fnret or osh_exit($fnret);
 
 my @cmd = qw( sudo -n -u );

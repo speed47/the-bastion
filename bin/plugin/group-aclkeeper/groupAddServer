@@ -123,7 +123,7 @@ if ($forcePassword) {
 # Now do it
 #
 
-$fnret = OVH::Bastion::is_group_aclkeeper(account => $self, group => $shortGroup, superowner => 1);
+$fnret = OVH::Bastion::is_group_aclkeeper(account => $Self->name, group => $shortGroup, superowner => 1);
 $fnret
   or osh_exit 'ERR_NOT_GROUP_ACLKEEPER',
   "Sorry, you must be an aclkeeper of group $shortGroup to be able to add servers to it";

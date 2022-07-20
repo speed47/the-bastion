@@ -38,30 +38,28 @@ $fnret = $Account->isExisting();
 $fnret or osh_exit $fnret;
 
 $account = $Account->name;
-my $sysaccount    = $Account->sysName;
-my $remoteaccount = $Account->remoteName;
 
 $fnret = OVH::Bastion::get_plugin_list(restrictedOnly => 1);
 $fnret or osh_exit $fnret;
 
 my %ret;
-if (OVH::Bastion::is_admin(account => $account)) {
-    osh_info "$account is a bastion " . colored('admin', 'green');
-    $ret{'is_admin'} = 1;
+if ($Account->isAdmin) {
+    osh_info "$Account is a bastion " . colored('admin', 'green');
+    $ret{'is_admin'} = \1;
 }
-if (OVH::Bastion::is_super_owner(account => $account)) {
-    osh_info "$account is a bastion " . colored('superowner', 'green');
-    $ret{'is_superowner'} = 1;
+if ($Account->isSuperOwner) {
+    osh_info "$Account is a bastion " . colored('superowner', 'green');
+    $ret{'is_superowner'} = \1;
 }
-if (OVH::Bastion::is_auditor(account => $account)) {
-    osh_info "$account is a bastion " . colored('auditor', 'green');
-    $ret{'is_auditor'} = 1;
+if ($Account->isAuditor) {
+    osh_info "$Account is a bastion " . colored('auditor', 'green');
+    $ret{'is_auditor'} = \1;
 }
 
 osh_info "This account has access to the following restricted commands:";
 my @granted;
 foreach my $plugin (sort keys %{$fnret->value}) {
-    $fnret = OVH::Bastion::is_user_in_group(user => $account, group => "osh-$plugin");
+    $fnret = $Account->canExecutePlugin($plugin);
     if ($fnret) {
         push @granted, $plugin;
         osh_info "- $plugin";
@@ -107,41 +105,36 @@ if ($listGroups) {
 $ret{'groups'} = $result_hash;
 
 my $canConnect = 1;
-$ret{'always_active'} = OVH::Bastion::account_config(
-    account => $account,
-    key     => OVH::Bastion::OPT_ACCOUNT_ALWAYS_ACTIVE,
-    public  => 1
-) ? 1 : 0;
+$ret{'always_active'} = $Account->getConfig("public/always_active")->value ? \1 : \0;
 if ($ret{'always_active'}) {
-    $ret{'is_active'} = 1;
+    $ret{'is_active'} = \1;
     osh_info "This account is " . colored('always', 'green') . " active";
 }
 else {
     $fnret = $Account->isActive();
     if ($fnret->is_ok) {
         osh_info "\nThis account is " . colored('active', 'green');
-        $ret{'is_active'} = 1;
+        $ret{'is_active'} = \1;
     }
     elsif ($fnret->is_ko) {
         osh_info "\nThis account is " . colored('INACTIVE', 'red');
         $canConnect = 0;
-        $ret{'is_active'} = 0;
+        $ret{'is_active'} = \0;
     }
 }
 
-if (OVH::Bastion::is_auditor(account => $self)) {
-
+if ($Self->isAuditor) {
     $fnret = $Account->isTTLNotExpired();
     if ($fnret->is_ok && $fnret->err eq 'OK_NO_TTL') {
         osh_info "This account has " . colored('no TTL set', 'green');
-        $ret{'is_ttl_expired'} = 0;
+        $ret{'is_ttl_expired'} = \0;
     }
     elsif ($fnret->is_ok && $fnret->err eq 'OK_TTL_VALID') {
         osh_info "This account "
           . colored('TTL is still valid', 'green')
           . " (for "
           . $fnret->value->{'details'}{'human'} . ")";
-        $ret{'is_ttl_expired'} = 0;
+        $ret{'is_ttl_expired'} = \0;
     }
     elsif ($fnret->is_ko) {
         osh_info "This account "
@@ -149,7 +142,7 @@ if (OVH::Bastion::is_auditor(account => $self)) {
           . " (for "
           . $fnret->value->{'details'}{'human'} . ")";
         $canConnect = 0;
-        $ret{'is_ttl_expired'} = 1;
+        $ret{'is_ttl_expired'} = \1;
     }
     else {
         osh_warn "Error getting account TTL expiration info (" . $fnret->msg . ")";
@@ -158,14 +151,14 @@ if (OVH::Bastion::is_auditor(account => $self)) {
     $fnret = $Account->isNotExpired();
     if ($fnret->is_ok) {
         osh_info "This account has seen recent-enough activity to " . colored('not be activity-expired', 'green');
-        $ret{'is_expired'} = 0;
+        $ret{'is_expired'} = \0;
     }
     elsif ($fnret->is_ko) {
         osh_info "This account is "
           . colored('EXPIRED', 'red')
           . " activity-wise (it hasn't been seen for a long time)";
         $canConnect = 0;
-        $ret{'is_expired'} = 1;
+        $ret{'is_expired'} = \1;
     }
     else {
         osh_warn "Error getting account expiration info (" . $fnret->msg . ")";
@@ -175,10 +168,10 @@ if (OVH::Bastion::is_auditor(account => $self)) {
         osh_info "As a consequence, this account "
           . ($canConnect ? colored("can", 'green') : colored("CANNOT", 'red'))
           . " connect to this bastion\n\n";
-        $ret{'can_connect'} = $canConnect;
+        $ret{'can_connect'} = $canConnect ? \1 : \0;
 
         if ($fnret->value->{'already_seen_before'}) {
-            $ret{'already_seen_before'} = 1;
+            $ret{'already_seen_before'} = \1;
             if (defined $fnret->value->{'seconds'}) {
                 $fnret = OVH::Bastion::duration2human(seconds => $fnret->value->{'seconds'}, tense => "past");
                 if ($fnret) {
@@ -202,16 +195,16 @@ if (OVH::Bastion::is_auditor(account => $self)) {
         }
         else {
             osh_info "This account has " . colored('NEVER', 'red') . " been used (yet)";
-            $ret{'already_seen_before'} = 0;
+            $ret{'already_seen_before'} = \0;
         }
     }
 
-    $fnret = OVH::Bastion::account_config(account => $account, key => "creation_info");
+    $fnret = $Account->getConfig("private/creation_info");
     if ($fnret) {
         my $creation_info;
         eval { $creation_info = decode_json($fnret->value); };
         if ($@) {
-            osh_warn("While reading creation metadata information for account '$account', couldn't decode JSON: $@");
+            warn_syslog("While reading creation metadata information for account '$Account', couldn't decode JSON: $@");
         }
         else {
             $ret{'creation_information'} = $creation_info;
@@ -269,7 +262,7 @@ if (OVH::Bastion::is_auditor(account => $self)) {
         public  => 1,
         key     => OVH::Bastion::OPT_ACCOUNT_INGRESS_PIV_POLICY
     );
-    $ret{'ingress_piv_enforced'} = ($fnret && $fnret->value eq 'yes') ? 1 : 0;    # keep for backwards compat
+    $ret{'ingress_piv_enforced'} = ($fnret && $fnret->value eq 'yes') ? \1 : \0;    # keep for backwards compat
     $ret{'ingress_piv_policy'}   = $fnret->value || undef;
     my $ingress_piv_policy_print = $ret{'ingress_piv_policy'} || 'default';
     osh_info "- PIV policy for ingress keys on this account is set to "
@@ -288,7 +281,7 @@ if (OVH::Bastion::is_auditor(account => $self)) {
           . " and expires in "
           . $human->{'human'};
         $ret{'ingress_piv_grace'} = {
-            enabled              => 1,
+            enabled              => \1,
             expiration_timestamp => $fnret->value,
             seconds_remaining    => $expiry,
             expiration_date      => $human->{'date'},
@@ -297,27 +290,27 @@ if (OVH::Bastion::is_auditor(account => $self)) {
     }
     else {
         osh_info "- PIV grace period for this account is " . colored('inactive', 'blue');
-        $ret{'ingress_piv_grace'} = {enabled => 0};
+        $ret{'ingress_piv_grace'} = {enabled => \0};
     }
 
     $fnret = OVH::Bastion::config('ingressRequirePIV')->value;
-    $ret{'global_ingress_policy'} = $fnret = OVH::Bastion::config('ingressRequirePIV')->value ? 1 : 0;
+    $ret{'global_ingress_policy'} = $fnret = OVH::Bastion::config('ingressRequirePIV')->value ? \1 : \0;
     osh_info "- Global PIV policy status is "
       . ($ret{'global_ingress_policy'} ? colored('enabled', 'red') : colored('disabled', 'blue'));
 
     $fnret = OVH::Bastion::is_effective_piv_account_policy_enabled(account => $account);
-    $ret{'effective_ingress_piv_policy'} = $fnret->is_ok ? 1 : 0;
+    $ret{'effective_ingress_piv_policy'} = $fnret->is_ok ? \1 : \0;
     osh_info "- As a consequence, PIV policy is "
       . ($ret{'effective_ingress_piv_policy'} ? colored('enforced', 'red') : colored('inactive', 'blue'))
       . " for this account";
 
     osh_info "\nAccount Multi-Factor Authentication status:";
     $ret{'mfa_password_required'} =
-      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_PASSWORD_REQUIRED_GROUP) ? 1 : 0;
+      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_PASSWORD_REQUIRED_GROUP) ? \1 : \0;
     $ret{'mfa_password_bypass'} =
-      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP) ? 1 : 0;
+      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP) ? \1 : \0;
     $ret{'mfa_password_configured'} =
-      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_PASSWORD_CONFIGURED_GROUP) ? 1 : 0;
+      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_PASSWORD_CONFIGURED_GROUP) ? \1 : \0;
     osh_info "- Additional password authentication is "
       . ($ret{'mfa_password_required'} ? colored('required', 'green') : colored('not required', 'blue'))
       . " for this account";
@@ -328,11 +321,11 @@ if (OVH::Bastion::is_auditor(account => $self)) {
       . ($ret{'mfa_password_configured'} ? colored('enabled and active', 'green') : colored('disabled', 'blue'));
 
     $ret{'mfa_totp_required'} =
-      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP) ? 1 : 0;
+      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP) ? \1 : \0;
     $ret{'mfa_totp_bypass'} =
-      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP) ? 1 : 0;
+      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP) ? \1 : \0;
     $ret{'mfa_totp_configured'} =
-      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP) ? 1 : 0;
+      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP) ? \1 : \0;
     osh_info "- Additional TOTP authentication is "
       . ($ret{'mfa_totp_required'} ? colored('required', 'green') : colored('not required', 'blue'))
       . " for this account";
@@ -343,12 +336,12 @@ if (OVH::Bastion::is_auditor(account => $self)) {
       . ($ret{'mfa_totp_configured'} ? colored('enabled and active', 'green') : colored('disabled', 'blue'));
 
     $ret{'pam_auth_bypass'} =
-      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::PAM_AUTH_BYPASS_GROUP) ? 1 : 0;
+      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::PAM_AUTH_BYPASS_GROUP) ? \1 : \0;
     osh_info "- PAM authentication bypass is "
       . ($ret{'pam_auth_bypass'} ? colored('enabled', 'green') : colored('disabled', 'blue'));
 
     $ret{'pubkey_auth_optional'} =
-      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::OSH_PUBKEY_AUTH_OPTIONAL_GROUP) ? 1 : 0;
+      OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::OSH_PUBKEY_AUTH_OPTIONAL_GROUP) ? \1 : \0;
     osh_info "- Optional public key authentication is "
       . ($ret{'pubkey_auth_optional'} ? colored('enabled', 'green') : colored('disabled', 'blue'));
 
@@ -360,8 +353,8 @@ if (OVH::Bastion::is_auditor(account => $self)) {
 
     $ret{'idle_ignore'} =
       OVH::Bastion::account_config(account => $account, key => OVH::Bastion::OPT_ACCOUNT_IDLE_IGNORE, public => 1)
-      ? 1
-      : 0;
+      ? \1
+      : \0;
     osh_info "\n- Account is immune to idle counter-measures: "
       . ($ret{'idle_ignore'} ? colored('yes', 'green') : colored('no', 'blue'));
 

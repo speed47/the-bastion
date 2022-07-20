@@ -44,7 +44,8 @@ sub interactive {
     my $Self           = $params{'Self'};
     my $fnret;
 
-    $Self->isExisting() or return;
+    $fnret = $Self->isExisting();
+    $fnret or return $fnret;
 
     my $bastionName            = OVH::Bastion::config('bastionName')->value();
     my $interactiveModeTimeout = OVH::Bastion::config('interactiveModeTimeout')->value() || 0;

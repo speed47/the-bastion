@@ -9,66 +9,70 @@ use OVH::Result;
 use OVH::Bastion;
 
 sub preconditions {
-    my %params = @_;
-    my ($self, $account, $group, $action, $type, $user, $userAny, $port, $portAny, $host, $ttl, $sudo, $silentoverride)
-      = @params{
-        qw{ self   account   group   action   type   user   userAny   port   portAny   host   ttl   sudo   silentoverride }
-      };
-    my $fnret;
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory       => [qw{ Self group role action }],
+        optional        => [qw{ host scriptName savedArgs account Account }],
+        optionalFalseOk => [qw{ user userAny port portAny ttl sudo silentoverride comment }],
+    );
+    $fnret or return $fnret;
 
-    if (!$self || !$account || !$group || !$type || !$action) {
-        return R('ERR_MISSING_PARAMETER',
-            msg => "Missing argument self[$self], account[$account], group[$group], type[$type] or action[$action]");
-    }
-
-    if (!grep { $action eq $_ } qw{ add del }) {
+    if (!grep { $p{'action'} eq $_ } qw{ add del }) {
         return R('ERR_INVALID_PARAMETER', msg => "Action should be add or del");
     }
 
+    if (!$p{'account'} && !$p{'Account'}) {
+        return R('ERR_MISSING_PARAMETER', msg => "Expected either 'account' or 'Account' parameter");
+    }
+    if ($p{'account'} && $p{'Account'}) {
+        return R('ERR_INVALID_PARAMETER', msg => "Got both 'account' and 'Account' parameters, expected only one");
+    }
+
     # a regex is overkill here but we need it for untaint
-    if ($type !~ /^(owner|gatekeeper|aclkeeper|member|guest)$/) {    ## no critic (ProhibitFixedStringMatches)
+    if ($p{'role'} !~ /^(owner|gatekeeper|aclkeeper|member|guest)$/) {    ## no critic (ProhibitFixedStringMatches)
         return R('ERR_INVALID_PARAMETER', msg => "Type should be either owner, gatekeeper, aclkeeper, member or guest");
     }
 
     # untaint it:
-    $type = $1;                                                      ## no critic (ProhibitCaptureWithoutTest)
+    $p{'role'} = $1;                                                      ## no critic (ProhibitCaptureWithoutTest)
 
-    if ($type eq 'guest' && !$sudo) {
+    if ($p{'role'} eq 'guest' && !$p{'sudo'}) {
 
         # guest access need (user||user-any), host and (port||port-any)
         # in sudo mode, these are not used, because the helper doesn't handle the guest access add by itself, the act() func of this package does
-        if (!($user xor $userAny)) {
+        if (!($p{'user'} xor $p{'userAny'})) {
             return R('ERR_MISSING_PARAMETER', msg => "Require exactly one argument of user or user-any");
         }
-        if (!($port xor $portAny)) {
+        if (!($p{'port'} xor $p{'portAny'})) {
             return R('ERR_MISSING_PARAMETER', msg => "Require exactly one argument of port or port-any");
         }
-        if (not $host) {
-            return R('ERR_MISSING_PARAMETER', msg => "Missing argument host for type guest");
+        if (not $p{'host'}) {
+            return R('ERR_MISSING_PARAMETER', msg => "Missing argument host for role guest");
         }
-        if ($port) {
-            $fnret = OVH::Bastion::is_valid_port(port => $port);
+        if ($p{'port'}) {
+            $fnret = OVH::Bastion::is_valid_port(port => $p{'port'});
             $fnret or return $fnret;
         }
-        if ($user and $user !~ /^[a-zA-Z0-9!._-]+$/) {
-            return R('ERR_INVALID_PARAMETER', msg => "Invalid remote user ($user) specified");
+        if ($p{'user'} and $p{'user'} !~ /^[a-zA-Z0-9!._-]+$/) {
+            return R('ERR_INVALID_PARAMETER', msg => "Invalid remote user ($p{'user'}) specified");
         }
 
-        if ($action eq 'add') {
+        if ($p{'action'} eq 'add') {
 
             # policy check for guest accesses: if group forces ttl, the account creation must comply
-            $fnret = OVH::Bastion::group_config(group => $group, key => "guest_ttl_limit");
+            $fnret = OVH::Bastion::group_config(group => $p{'group'}, key => "guest_ttl_limit");
 
             # if this config key is not set, no policy enforce has been requested, otherwise, check it:
             if ($fnret) {
                 my $max = $fnret->value();
-                if (!$ttl) {
+                if (!$p{'ttl'}) {
                     return R('ERR_INVALID_PARAMETER',
                             msg => "This group requires guest accesses to have a TTL set, to a duration of "
                           . OVH::Bastion::duration2human(seconds => $max)->value->{'duration'}
                           . " or less");
                 }
-                if ($ttl > $max) {
+                if ($p{'ttl'} > $max) {
                     return R('ERR_INVALID_PARAMETER',
                         msg => "The TTL you specified is invalid, this group requires guest accesses to have a TTL of "
                           . OVH::Bastion::duration2human(seconds => $max)->value->{'duration'}
@@ -78,58 +82,76 @@ sub preconditions {
         }
     }
 
-    $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
+    my $Self = $p{'Self'};
+    if ($Self->isa("OVH::Result") && $Self->code eq 'KO_FORBIDDEN_NAME' && $p{'calledByRoot'} && $< == 0) {
+        ;    # special case where we're called by the groupSetRole helper, it's ok
+             # FIXME still needed?
+    }
+    else {
+        $fnret = $Self->check();
+        $fnret or return $fnret;
+    }
+
+    my $Account = $p{'Account'} ? $p{'Account'} : OVH::Bastion::Account->newFromName($p{'account'});
+    $Account or return $Account;
+    $fnret = $Account->check();
+    $fnret or return $fnret;
+
+    $fnret = OVH::Bastion::is_valid_group_and_existing(group => $p{'group'}, groupType => "key");
     $fnret or return $fnret;
 
     # get returned untainted value
-    $group = $fnret->value->{'group'};
+    $p{'group'} = $fnret->value->{'group'};
     my $shortGroup = $fnret->value->{'shortGroup'};
 
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-    $fnret or return $fnret;
-
-    # get returned untainted value
-    $account = $fnret->value->{'account'};
-    my $realm         = $fnret->value->{'realm'};
-    my $remoteaccount = $fnret->value->{'remoteaccount'};
-    my $sysaccount    = $fnret->value->{'sysaccount'};
-
-    if ($self eq 'root' && $< == 0) {
+    if ($p{'calledByRoot'}) {    # FIXME still needed? not set anywhere
         osh_debug("called by root, allowing anyway");
     }
     else {
         my $neededright = 'unknown';
-        if (grep { $type eq $_ } qw{ owner gatekeeper aclkeeper }) {
+        if (grep { $p{'role'} eq $_ } qw{ owner gatekeeper aclkeeper }) {
             $neededright = "owner";
-            $fnret =
-              OVH::Bastion::is_group_owner(account => $self, group => $shortGroup, superowner => 1, sudo => $sudo);
+            $fnret       = OVH::Bastion::is_group_owner(
+                account    => $Self->name,
+                group      => $shortGroup,
+                superowner => 1,
+                sudo       => $p{'sudo'}
+            );
             if (!$fnret) {
-                osh_debug("user $self not an owner of $shortGroup");
+                osh_debug("user " . $Self->name . " not an owner of $shortGroup");
                 return R('ERR_NOT_GROUP_OWNER',
-                    msg => "Sorry, you're not an owner of group $shortGroup, which is needed to change its $type list");
+                        msg => "Sorry, you're not an owner of group $shortGroup, which is needed to change its "
+                      . $p{'role'}
+                      . " list");
             }
 
-            # if account is from a realm, he can't be owner/gk/aclk
-            if (defined $realm) {
-                return R('ERR_REALM_USER', msg => "Sorry, $account is from another realm, this account can't be $type");
+            # if account is from a realm, they can't be owner/gk/aclk
+            if ($Account->realm) {
+                return R('ERR_REALM_USER',
+                    msg => "Sorry, " . $Account->name . " is from another realm, this account can't be " . $p{'role'});
             }
         }
-        elsif (grep { $type eq $_ } qw{ member guest }) {
+        elsif (grep { $p{'role'} eq $_ } qw{ member guest }) {
             $neededright = "gatekeeper";
-            $fnret =
-              OVH::Bastion::is_group_gatekeeper(account => $self, group => $shortGroup, superowner => 1, sudo => $sudo);
+            $fnret       = OVH::Bastion::is_group_gatekeeper(
+                account    => $Self->name,
+                group      => $shortGroup,
+                superowner => 1,
+                sudo       => $p{'sudo'}
+            );
             if (!$fnret) {
-                osh_debug("user $self not a gk of $shortGroup");
+                osh_debug("user " . $Self->name . " not a gk of $shortGroup");
                 return R('ERR_NOT_GROUP_GATEKEEPER',
-                    msg =>
-                      "Sorry, you're not a gatekeeper of group $shortGroup, which is needed to change its $type list");
+                        msg => "Sorry, you're not a gatekeeper of group $shortGroup, which is needed to change its "
+                      . $p{'role'}
+                      . " list");
             }
         }
         else {
-            return R('ERR_INTERNAL', msg => "Unknown type $type");
+            return R('ERR_INTERNAL', msg => "Unknown role " . $p{'role'});
         }
 
-        if ($fnret->value() and $fnret->value()->{'superowner'} and not $silentoverride) {
+        if ($fnret->value() && $fnret->value()->{'superowner'} && !$p{'silentoverride'}) {
             osh_warn "SUPER OWNER OVERRIDE: You're not a $neededright of the group $shortGroup,";
             osh_warn "but allowing because you're a superowner. This has been logged.";
 
@@ -138,9 +160,9 @@ sub preconditions {
                 type      => 'security',
                 fields    => [
                     ['type',    'superowner-override'],
-                    ['account', $params{'self'}],
-                    ['plugin',  $params{'scriptName'}],
-                    ['params',  $params{'savedArgs'}],
+                    ['account', $Self->name],
+                    ['plugin',  $p{'scriptName'}],
+                    ['params',  $p{'savedArgs'}],
                 ]
             );
         }
@@ -149,55 +171,58 @@ sub preconditions {
     return R(
         'OK',
         value => {
-            group         => $group,
-            shortGroup    => $shortGroup,
-            account       => $account,
-            type          => $type,
-            realm         => $realm,
-            remoteaccount => $remoteaccount,
-            sysaccount    => $sysaccount
+            group      => $p{'group'},
+            shortGroup => $shortGroup,
+            Account    => $Account,
+            role       => $p{'role'},
         }
     );
 }
 
 sub act {
-    my %params = @_;
-    my $fnret  = preconditions(%params);
+    my %p     = @_;
+    my $fnret = preconditions(%p);    # check_args is done there
     $fnret or return $fnret;
 
     # get returned untainted value
     my %values = %{$fnret->value()};
-    my ($group, $shortGroup, $account, $type, $realm, $remoteaccount, $sysaccount) =
-      @values{qw{ group shortGroup account type realm remoteaccount sysaccount }};
-    my ($action, $self, $user, $host, $port, $ttl, $comment) = @params{qw{ action self user host port ttl comment }};
+    my ($group, $shortGroup, $Account, $role) = @values{qw{ group shortGroup Account role }};
+    my ($action, $user, $host, $port, $ttl, $comment) = @p{qw{ action user host port ttl comment }};
 
-    undef $user if $params{'userAny'};
-    undef $port if $params{'portAny'};
+    my $Self = $p{'Self'};
+
+    undef $user if $p{'userAny'};
+    undef $port if $p{'portAny'};
     my @command;
 
-    osh_debug(
-        "groupSetRole::act, $action $type $group/$account ($sysaccount/$realm/$remoteaccount) $user\@$host:$port ttl=$ttl"
-    );
+    osh_debug("groupSetRole::act, $action $role $group/$Account $user\@$host:$port ttl=$ttl comment=$comment");
 
     # add/del system user to system group except if we're removing a guest access (will be done after if needed)
-    if (!($type eq 'guest' and $action eq 'del')) {
-        @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
+    if (!($role eq 'guest' and $action eq 'del')) {
+        @command = ();
+        if ($< != 0) {
+            # don't use sudo if we're already running under root through sudo, this way we keep the SUDO_USER intact
+            # and in the helper below, we build the proper $Self. This happens when a helper calls us.
+            push @command, qw{ sudo -n -u root -- };
+        }
+        push @command, qw{ /usr/bin/env perl -T };
         push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupSetRole';
-        push @command, '--type', $type;
+        push @command, '--type', $role;
         push @command, '--group', $group;
-        push @command, '--account', $account, '--action', $action;
+        push @command, '--account', $Account->name;
+        push @command, '--action', $action;
         $fnret = OVH::Bastion::helper(cmd => \@command);
         $fnret or return $fnret;
     }
 
-    if ($type eq 'member') {
+    if ($role eq 'member') {
 
         if ($action eq 'add'
-            && OVH::Bastion::is_group_guest(group => $shortGroup, account => $account, sudo => $params{'sudo'}))
+            && OVH::Bastion::is_group_guest(group => $shortGroup, account => $Account->name, sudo => $p{'sudo'}))
         {
 
             # if the user is a guest, must remove all their guest accesses first
-            $fnret = OVH::Bastion::get_acl_way(way => 'groupguest', group => $shortGroup, account => $account);
+            $fnret = OVH::Bastion::get_acl_way(way => 'groupguest', group => $shortGroup, account => $Account->name);
             if ($fnret && $fnret->value && @{$fnret->value}) {
                 osh_warn("This account was previously a guest of this group, with the following accesses:");
                 my @acl = @{$fnret->value};
@@ -211,21 +236,21 @@ sub act {
                     $machine .= ':' . $access->{'port'} if defined $access->{'port'};
                     $machine = $access->{'user'} . '@' . $machine if defined $access->{'user'};
                     $fnret   = OVH::Bastion::Plugin::groupSetRole::act(
-                        account => $account,
+                        Self    => $Self,
+                        Account => $Account,
                         group   => $shortGroup,
                         action  => 'del',
-                        type    => 'guest',
+                        role    => 'guest',
                         user    => $access->{'user'},
                         userAny => (defined $access->{'user'} ? 0 : 1),
                         port    => $access->{'port'},
                         portAny => (defined $access->{'port'} ? 0 : 1),
                         host    => $access->{'ip'},
-                        self    => $self,
                     );
                     if (!$fnret) {
                         osh_warn("Failed removing guest access to $machine, proceeding anyway...");
-                        warn_syslog(
-                            "Failed removing guest access to $machine in group $shortGroup for $account, before granting this account full membership on behalf of $self: "
+                        warn_syslog("Failed removing guest access to $machine in group $shortGroup for $Account, "
+                              . "before granting this account full membership on behalf of $Self: "
                               . $fnret->msg);
                     }
                 }
@@ -236,7 +261,7 @@ sub act {
         @command = qw{ sudo -n -u allowkeeper -- /usr/bin/env perl -T };
         push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupAddSymlinkToAccount';
         push @command, '--group', $group;    # must be first params, forced in sudoers.d
-        push @command, '--account', $account;
+        push @command, '--account', $Account->name;
         push @command, '--action',  $action;
         $fnret = OVH::Bastion::helper(cmd => \@command);
         $fnret or return $fnret;
@@ -245,12 +270,12 @@ sub act {
 
             # make the error msg user friendly
             $fnret->{'msg'} =
-                "Account $account was already "
+                "Account $Account was already "
               . ($action eq 'del' ? 'not ' : '')
               . "a member of $shortGroup, nothing to do";
         }
     }
-    elsif ($type eq 'guest') {
+    elsif ($role eq 'guest') {
 
         # in that case, we need to handle the add/del of the guest access to $user@$host:$port
         # check if group has access to $user@$ip:$port
@@ -258,7 +283,7 @@ sub act {
         $port and $machine .= ":$port";
         $user and $machine = $user . '@' . $machine;
         osh_debug(
-            "groupSetRole::act, checking if group $group has access to $machine to $action $type access to $account");
+            "groupSetRole::act, checking if group $group has access to $machine to $action $role access to $Account");
 
         if ($action eq 'add') {
 
@@ -282,16 +307,16 @@ sub act {
         }
 
         # If the account is already a member, can't add/del them as guest
-        if (OVH::Bastion::is_group_member(group => $shortGroup, account => $account, sudo => $params{'sudo'})) {
+        if (OVH::Bastion::is_group_member(group => $shortGroup, account => $Account->name, sudo => $p{'sudo'})) {
             return R('ERR_MEMBER_CANNOT_BE_GUEST',
-                msg => "Can't $action $account as a guest of group $shortGroup, they're already a member!");
+                msg => "Can't $action $Account as a guest of group $shortGroup, they're already a member!");
         }
 
         # Add/Del user access to user@host:port with group key
         @command = qw{ sudo -n -u allowkeeper -- /usr/bin/env perl -T };
         push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountAddGroupServer';
         push @command, '--group', $group;    # must be first params, forced in sudoers.d
-        push @command, '--account', $account;
+        push @command, '--account', $Account->name;
         push @command, '--action',  $action;
         push @command, '--ip',      $host;
         push @command, '--user',    $user if $user;
@@ -304,22 +329,22 @@ sub act {
 
         if ($fnret->err eq 'OK_NO_CHANGE') {
             if ($action eq 'add') {
-                osh_info "Account $account already had access to $machine through $shortGroup";
+                osh_info "Account $Account already had access to $machine through $shortGroup";
             }
             else {
-                osh_info "Account $account didn't have access to $machine through $shortGroup";
+                osh_info "Account $Account didn't have access to $machine through $shortGroup";
             }
         }
         else {
             if ($action eq 'add') {
-                osh_info "Account $account has now access to the group key of $shortGroup, but does NOT";
+                osh_info "Account $Account has now access to the group key of $shortGroup, but does NOT";
                 osh_info "automatically inherits access to any of the group's servers, only to $machine,";
-                osh_info "and any other(s) $shortGroup group server(s) previously granted to $account.";
+                osh_info "and any other(s) $shortGroup group server(s) previously granted to $Account.";
                 osh_info "This access will expire in " . OVH::Bastion::duration2human(seconds => $ttl)->value->{'human'}
                   if $ttl;
             }
             else {
-                osh_info "Access to $machine through group $shortGroup was removed from account $account";
+                osh_info "Access to $machine through group $shortGroup was removed from account $Account";
             }
         }
 
@@ -328,22 +353,23 @@ sub act {
             # if the guest group access file of this account is now empty, we should remove the account from the group
             # but ONLY if the account doesn't have regular member access to the group too.
             my $accessesFound = 0;
-            if (!$realm) {
+            if (!$Account->realm) {
 
                 # in non-realm mode, just check the account itself
-                $fnret = OVH::Bastion::get_acl_way(way => 'groupguest', group => $shortGroup, account => $account);
+                $fnret =
+                  OVH::Bastion::get_acl_way(way => 'groupguest', group => $shortGroup, account => $Account->name);
                 $fnret or return $fnret;
                 $accessesFound += @{$fnret->value};
             }
             else {
                 # in realm-mode, we need to check that all the other remote accounts no longer have access either, before removing the key
-                $fnret = OVH::Bastion::get_remote_accounts_from_realm(realm => $realm);
+                $fnret = OVH::Bastion::get_remote_accounts_from_realm(realm => $Account->realm);
                 $fnret or return $fnret;
                 foreach my $pRemoteaccount (@{$fnret->value}) {
                     $fnret = OVH::Bastion::get_acl_way(
                         way     => 'groupguest',
                         group   => $shortGroup,
-                        account => "$realm/$pRemoteaccount"
+                        account => sprintf("%s/%s", $Account->realm, $pRemoteaccount)
                     );
                     $accessesFound += @{$fnret->value};
                     last if $accessesFound > 0;
@@ -351,10 +377,10 @@ sub act {
             }
 
             if ($accessesFound == 0
-                && !OVH::Bastion::is_group_member(group => $shortGroup, account => $account, sudo => $params{'sudo'}))
+                && !OVH::Bastion::is_group_member(group => $shortGroup, account => $Account->name, sudo => $p{'sudo'}))
             {
                 osh_debug
-                  "No guest access remains to group $shortGroup for account $account, removing group key access";
+                  "No guest access remains to group $shortGroup for account $Account, removing group key access";
                 #
                 # remove account from group
                 #
@@ -362,26 +388,21 @@ sub act {
                 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupSetRole';
                 push @command, '--type', 'guest';
                 push @command, '--group', $group;
-                push @command, '--account', $account;
+                push @command, '--account', $Account->name;
                 push @command, '--action', 'del';
 
                 $fnret = OVH::Bastion::helper(cmd => \@command);
                 $fnret or return $fnret;
 
-                if (!$realm) {
-                    osh_info
-                      "No guest access to servers of group $shortGroup remained for account $account, removed group key access";
-                }
-                else {
-                    osh_info
-                      "No guest access to servers of group $shortGroup remained for realm $realm, removed group key access";
-                }
+                my $displayName = $Account->realm ? "realm " . $Account->realm : "account $Account";
+                osh_info
+                  "No guest access to servers of group $shortGroup remained for $displayName, removed group key access";
             }
         }
         else {
-            osh_info "\nYou can view ${account}'s guest accesses to $shortGroup with the following command:";
+            osh_info "\nYou can view ${Account}'s guest accesses to $shortGroup with the following command:";
             my $bastionName = OVH::Bastion::config('bastionName')->value();
-            osh_info "$bastionName --osh groupListGuestAccesses --account $account --group $shortGroup";
+            osh_info "$bastionName --osh groupListGuestAccesses --account $Account --group $shortGroup";
         }
     }
 
@@ -392,10 +413,10 @@ sub act {
             type     => 'membership',
             fields   => [
                 ['action',  $action],
-                ['type',    $type],
+                ['type',    $role],
                 ['group',   $shortGroup],
-                ['account', $account],
-                ['self',    $self],
+                ['account', $Account->name],
+                ['self',    $Self->name],
                 ['user',    $user],
                 ['host',    $host],
                 ['port',    $port],

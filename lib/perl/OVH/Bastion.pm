@@ -6,6 +6,8 @@ use Fcntl;
 use POSIX qw(strftime);
 use List::Util qw{ any };
 
+use File::Basename;
+use lib dirname(__FILE__) . '/..';
 use OVH::Bastion::Account;
 
 our $VERSION = '3.09.00-rc3';
@@ -894,50 +896,46 @@ sub check_args {
     # if these arrays are not empty at the end of this func, our caller has a problem
     my @errorUnknown;
     my @errorMissing;
+    my @errorFalse;
 
-    my $caller1 = (caller(1))[3];
-    my $caller2 = (caller(2))[3];
-    if ($caller2 eq 'Memoize::_memoizer') {
-        $caller2 = (caller(4))[3];
+    my $callerStack = (caller(1))[3];
+    my $i           = 2;
+    while (caller($i)) {
+        my $func = (caller($i))[3];
+        $callerStack .= " < $func" if $func !~ m{^Memoize};
+        $i++;
     }
 
     foreach my $key (keys %$args) {
         # we've seen this key, drop it from the keys-that-are-yet-to-be-seen
         delete $unseenMandatory{$key};
 
-        if (!$unknownOk && !any { $key eq $_ } (@$optional, @$mandatory)) {
+        if (!$unknownOk && !any { $key eq $_ } (@$optional, @$mandatory, @$optionalFalseOk, @$mandatoryFalseOk)) {
             # this key is unknown, and it's not ok to be unknown
-            warn_syslog(
-                sprintf(
-                    "check_args: function '%s' called by '%s' with the unknown parameter '%s'",
-                    $caller1, $caller2, $key
-                )
-            );
             push @errorUnknown, $key;
         }
-        if (!$args->{$key} && !any { $key eq $_ } (@$mandatoryFalseOk, @$optionalFalseOk)) {
+        elsif (!$args->{$key} && !any { $key eq $_ } (@$mandatoryFalseOk, @$optionalFalseOk)) {
             # this key exists but its value is false (empty/undef/0), and it's not ok to be false
-            warn_syslog(
-                sprintf(
-                    "check_args: function '%s' called by '%s' with a false value for '%s'",
-                    $caller1, $caller2, $key
-                )
-            );
-            push @errorMissing, $key;
+            push @errorFalse, $key;
         }
     }
 
     # all the unseen keys are problematic at this stage
     push @errorMissing, keys %unseenMandatory;
-    warn_syslog(
-        sprintf(
-            "check_args: function '%s' called by '%s' without the mandatory parameter '%s'", $caller1, $caller2, $_
-        )
-    ) for @errorMissing;
 
-    return R('OK') if (!@errorUnknown && !@errorMissing);
+    # log verbose info in logs
+    osh_warn(
+        sprintf("check_args: mandatory parameters '@errorMissing' missing in call to '%s' by '%s'", $callerStack, $0))
+      if @errorMissing;
+    osh_warn(sprintf("check_args: unknown parameters '@errorUnknown' in func '%s' by '%s'", $callerStack, $0))
+      if @errorUnknown;
+    osh_warn(sprintf("check_args: false value for parameters '@errorFalse' in func '%s' by '%s'", $callerStack, $0))
+      if @errorFalse;
+
     return R('ERR_MISSING_ARGUMENT', msg => "Missing arguments: @errorMissing") if @errorMissing;
     return R('ERR_UNKNOWN_ARGUMENT', msg => "Unknown arguments: @errorUnknown") if @errorUnknown;
+    return R('ERR_EMPTY_ARGUMENT',   msg => "Empty arguments: @errorFalse")     if @errorFalse;
+    return R('OK');
 }
 
 1;

@@ -29,10 +29,10 @@ my $fnret = OVH::Bastion::Plugin::groupSetRole::act(
     account        => $account,
     group          => $group,
     action         => 'del',
-    type           => 'aclkeeper',
+    role           => 'aclkeeper',
     sudo           => 0,
     silentoverride => 0,
-    self           => $self,
+    Self           => $Self,
     scriptName     => $scriptName,
     savedArgs      => $savedArgs
 );

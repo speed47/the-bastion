@@ -27,7 +27,8 @@ to add ACCOUNT as an owner, then removing yourself with ``groupDelOwner``
 EOF
 );
 
-if ($self eq $account) {
+if ($Self->name eq $account) {
+    # FIXME not handled by groupSetRole::act() ?
     osh_exit(R('OK_NO_CHANGE', msg => "Nothing to do to transmit the ownership of the group to yourself"));
 }
 
@@ -35,10 +36,10 @@ my $fnret = OVH::Bastion::Plugin::groupSetRole::act(
     account        => $account,
     group          => $group,
     action         => 'add',
-    type           => 'owner',
+    role           => 'owner',
     sudo           => 0,
     silentoverride => 0,
-    self           => $self,
+    Self           => $Self,
     scriptName     => $scriptName,
     savedArgs      => $savedArgs
 );
@@ -49,13 +50,13 @@ if (not $fnret) {
 
 osh_exit(
     OVH::Bastion::Plugin::groupSetRole::act(
-        account        => $self,
+        account        => $Self->name,
         group          => $group,
         action         => 'del',
-        type           => 'owner',
+        role           => 'owner',
         sudo           => 0,
         silentoverride => 0,
-        self           => $self,
+        Self           => $Self,
         scriptName     => $scriptName,
         savedArgs      => $savedArgs
     )

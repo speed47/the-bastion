@@ -994,7 +994,16 @@ sub ssh_test_access_way {
     push @command, "-l", $user, $ip, '-T', '--', 'true';
 
     osh_info("Testing connection to $user\@$ip, please wait...");
-    $fnret = OVH::Bastion::execute(cmd => \@command, noisy_stderr => 1);
+    # in case the remote server happens to be a bastion too, and the account we're
+    # testing is a realm support account there, we need to set LC_BASTION or the remote
+    # bastion won't be happy
+    if ($user =~ /^realm_/ && !$ENV{'LC_BASTION'}) {
+        local $ENV{'LC_BASTION'} = OVH::Bastion::get_user_from_env()->value;
+        $fnret = OVH::Bastion::execute(cmd => \@command, noisy_stderr => 1);
+    }
+    else {
+        $fnret = OVH::Bastion::execute(cmd => \@command, noisy_stderr => 1);
+    }
     $fnret or return $fnret;
 
     if (grep { $fnret->value->{'sysret'} eq $_ }

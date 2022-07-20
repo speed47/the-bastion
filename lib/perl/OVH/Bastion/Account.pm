@@ -9,70 +9,91 @@ use Cwd; # getcwd
 use OVH::Bastion;
 use OVH::Result;
 
+use overload
+    '""' => 'name';
+
 # instantiate a new account corresponding to the one we have here,
 # this in effects nullify all cache handled by memoize for this new instance,
 # hence the name ->refresh()
 sub refresh {
     my $this = shift;
-    return $this->newFromName(name => $this->name);
+    return $this->newFromName($this->name);
 }
 
 # FIXME double-check that memoize works at the instance level, aka 1 hashcache per instance!!
 
 sub newFromEnv {
     my ($this, %p) = @_;
-    $p{'name'} = OVH::Bastion::get_user_from_env()->value;
-    return $this->newFromName(%p);
+    return $this->newFromName(OVH::Bastion::get_user_from_env()->value, %p);
 }
 
-memoize('newInvalid');
-sub newInvalid {
+memoize('newLocalRoot');
+sub newLocalRoot {
     my ($this, %p) = @_;
-    $p{'name'} = '<none>';
-    return $this->newFromName(%p);
+    $p{'isFake'} = 1;
+    return $this->newFromName('<root>', %p);
 }
 
 # $name can be "joe" or "realm/joe"
+## no critic(Subroutines::RequireArgUnpacking)
 sub newFromName {
-    my objectType = shift;
-    my %params;
+    my ($objectType, $name, %p) = @_;
+    $p{'name'} = $name;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ name }],
+        optional => [qw{ type }],
+        optionalFalseOk => [qw{ isFake }],
+    );
+    $fnret or return $fnret;
 
-    # can be used as:
-    # - newFromName("thename");
-    # - newFromName(name => "thename", option1 => "value1", ...);
-    if (@_ == 1) {
-        $params{'name'} = shift;
+    if ($name eq 'root' && $< == 0) {
+        # FIXME for scripts launched as root, such as install and such
+        return __PACKAGE__->newLocalRoot();
+    }
+
+    my $Account;
+    if ($p{'isFake'}) {
+        # an isFake account just has a name and doesn't represent any actual bastion account
+        $Account = {
+            name   => $name,
+            sysName => undef,
+            isFake => 1,
+        };
     }
     else {
-        %params = @_;
+        # FIXME it means we can't newFromName() an account that is INVALID but EXISTING. is this a problem?
+        $fnret = _new_from_name(%p);
+        $fnret or return $fnret;
+        # we have either:
+        # R('OK', value => {sysaccount => "realm_$1", realm => $1,    remoteaccount => $2,    account => "$1/$2"});
+        # R('OK', value => {sysaccount => $1,         realm => undef, remoteaccount => undef, account => $1});
+
+        $Account = {
+            name       => $fnret->value->{'account'},           # joe   or acme/joe
+            sysName    => $fnret->value->{'sysaccount'},        # joe   or realm_acme
+            remoteName => $fnret->value->{'remoteaccount'},     # undef or joe
+            realm      => $fnret->value->{'realm'},             # undef or acme
+            allowkeeperHome => '/home/allowkeeper/'.$fnret->value->{'sysaccount'},
+            isFake     => 0,
+            # an Account instance may or may not actually exist on the system, until
+            # ->isExisting() is called. If the account does exist, said func will
+            # set the following params:
+            uid        => undef,
+            gid        => undef,
+            home       => undef, # FIXME shall we force /home/$sysaccount here? and yell in isExisting if passwd disagrees?
+        };
     }
-
-    # FIXME it means we can't newFromName() an account that is INVALID but EXISTING. is this a problem?
-    my $fnret = _new_from_name(%params);
-    $fnret or return $fnret;
-    # we have either:
-    # R('OK', value => {sysaccount => "realm_$1", realm => $1,    remoteaccount => $2,    account => "$1/$2"});
-    # R('OK', value => {sysaccount => $1,         realm => undef, remoteaccount => undef, account => $1});
-
-    my $Account = {
-        name       => $fnret->value->{'account'},           # joe   or acme/joe
-        sysName    => $fnret->value->{'sysaccount'},        # joe   or realm_acme
-        remoteName => $fnret->value->{'remoteaccount'},     # undef or joe
-        realm      => $fnret->value->{'realm'},             # undef or acme
-        allowkeeperHome => '/home/allowkeeper/'.$fnret->value->{'sysaccount'},
-        # an Account instance may or may not actually exist on the system, until
-        # ->isExisting() is called. If the account does exist, said func will
-        # set the following params:
-        uid        => undef,
-        gid        => undef,
-        home       => undef, # FIXME shall we force /home/$sysaccount here? and yell in isExisting if passwd disagrees?
-    };
 
     bless $Account, 'OVH::Bastion::Account';
 
     lock_hashref_recurse($Account);
 
     return $Account;
+}
+
+sub isFake {
+    my $this = shift;
+    return $this->{'isFake'};
 }
 
 sub name {
@@ -139,7 +160,8 @@ sub getConfig {
         return R('ERR_INVALID_PARAMETER', msg => "Invalid configuration key asked ($compositeKey)");
     }
 
-    $this->check() or return;
+    $fnret = $this->check();
+    $fnret or return $fnret;
 
     # private:
     # /home/user/config.key
@@ -238,10 +260,11 @@ sub isActive {
 
 memoize('isTTLNotExpired');
 sub isTTLNotExpired {
-    my ($this, %params) = @_;
+    my ($this, %p) = @_;
     my $fnret;
 
-    $this->isExisting() or return;
+    $fnret = $this->isExisting();
+    $fnret or return $fnret;
 
     $fnret = $this->getConfig('private/account_ttl');
     if ($fnret) {
@@ -280,16 +303,15 @@ sub isTTLNotExpired {
 
 memoize('isNotExpired');
 sub isNotExpired {
-    my ($this, %params) = @_;
+    my ($this, %p) = @_;
+    my $fnret;
 
-    $this->isExisting() or return;
+    $fnret = $this->isExisting();
+    $fnret or return $fnret;
 
     # accountMaxInactiveDays is the max allowed inactive days to not block login. 0 means feature disabled.
-    my $accountMaxInactiveDays = 0;
-    my $fnret                  = OVH::Bastion::config('accountMaxInactiveDays');
-    if ($fnret and $fnret->value > 0) {
-        $accountMaxInactiveDays = $fnret->value;
-    }
+    $fnret = OVH::Bastion::config('accountMaxInactiveDays');
+    my $accountMaxInactiveDays = ($fnret && $fnret->value > 0) ? $fnret->value : 0;
 
     # some accounts might have a specific configuration overriding the global one
     $fnret = $this->getConfig('public/max_inactive_days');
@@ -300,7 +322,7 @@ sub isNotExpired {
     my $isFirstLogin;
     my $lastlog;
     # XXX HERE
-    my $filepath = sprintf("/home/%s/lastlog%s", $this->name, $this->remoteName ? "_".$this->remoteName : ""); # FIXME move login into Account
+    my $filepath = sprintf("/home/%s/lastlog%s", $this->sysName, $this->remoteName ? "_".$this->remoteName : ""); # FIXME move login into Account
     my $value    = {filepath => $filepath};
     if (-e $filepath) {
         $isFirstLogin = 0;
@@ -379,9 +401,11 @@ sub isNotExpired {
 
 memoize('isExisting');
 sub isExisting {
-    my ($this, %params) = @_;
-    my $nocache = $params{'nocache'};
-    # FIXME check spurious args and warn
+    my ($this, %p) = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        optional => [qw{ nocache }],
+    );
+    $fnret or return $fnret;
 
     my %entry;
     if (OVH::Bastion::is_mocking()) {
@@ -397,7 +421,7 @@ sub isExisting {
         );
     }
     else {
-        my $fnret = OVH::Bastion::sys_getpw_name(name => $this->sysName, cache => !$nocache);
+        my $fnret = OVH::Bastion::sys_getpw_name(name => $this->sysName, cache => !$p{'nocache'});
         if ($fnret) {
             %entry = %{$fnret->value};
         }
@@ -433,11 +457,29 @@ sub isExisting {
 }
 
 # checks that isExisting() and potentially other tiny things to ensure the account is sane
-memoize('check');
+# do NOT memoize this one, as we're looking at global env and $<, we memoize _check() instead
 sub check {
-    my ($this, %params) = @_;
+    my ($this, %p) = @_;
 
-    $this->isExisting() or return;
+    # if we are manipulating the a localRoot account, and we're running under root
+    # privileges without sudo, then deem this account as valid so that scripts running
+    # directly under root (such as the install script) find that $Self is valid and carry on
+    # We don't memoize this func because of this 'if'.
+    if ($this->name eq '<root>' && $this->isFake && $< == 0 && !$ENV{'SUDO_USER'}) {
+        return R('OK');
+    }
+
+    # the logic of this func can be memoized, see below
+    return $this->_check();
+}
+
+memoize('_check');
+sub _check {
+    my ($this, %p) = @_;
+    my $fnret;
+
+    $fnret = $this->isExisting();
+    $fnret or return $fnret;
 
     if (!-d $this->home) {
         return R('KO_INVALID_DIRECTORY', msg => "This account's home directory doesn't exist");
@@ -466,6 +508,7 @@ sub _new_from_name {
     # - remote: allow only realm-formatted accounts aka $realm/$remoteself
     # - regular: either a local or remote account (autodetect and allow both)
     # - realm: a realm support account, must start with realm_*
+    # - account: either a local, remote or realm support account (autodetect and allow these 3)
     # - incoming: either a local account or a realm account, in which case we'll autodetect
     #             the remote account (through LC_BASTION) and setup accordingly. If we don't find a remote account
     #             and we have a realm account, deny it (return an error). Mainly used to create an Account instance
@@ -473,11 +516,19 @@ sub _new_from_name {
     # - group: system user with the same uid than a bastion group's gid, must start with key*
     #        FIXME: type=group is actually not an ::Account and shouldn't be there
 
-
     # if both types are allowed, resolve whether it looks like a local or remote account
     # so that the proper tests are done in the rest of the func
+#MIGRA OVH::Bastion::osh_warn("type=$type name=$name caller1=".(caller(1))[3]." and caller2=".(caller(2))[3]." and caller3=".(caller(3))[3]." from $0");
     if ($type eq 'regular') {
         $type = ($name =~ m{/} ? 'remote' : 'local');
+    }
+    elsif ($type eq 'account') {
+        if ($name =~ /^realm_/) {
+            $type = 'realm';
+        }
+        else {
+            $type = ($name =~ m{/} ? 'remote' : 'local');
+        }
     }
     my $whatis = ($type eq 'remote' ? "Realm" : "Account");
 
@@ -493,8 +544,8 @@ sub _new_from_name {
     elsif ($name !~ m/^key/i && $type eq 'group') {
         return R('KO_BAD_PREFIX', msg => "$whatis should start with the group prefix");
     }
-    elsif ($name =~ m/^realm_/ && $type ne 'realm') {
-        return R('KO_FORBIDDEN_PREFIX', msg => "$whatis name contains an unauthorized realm prefix");
+    elsif ($name =~ m/^realm_/ && none { $type eq $_ } qw{ realm incoming }) {
+        return R('KO_FORBIDDEN_PREFIX', msg => "$whatis name contains an unauthorized realm prefix type=$type name=$name");
     }
     elsif ($name !~ m/^realm_/ && $type eq 'realm') {
         return R('KO_BAD_PREFIX', msg => "$whatis should start with the realm prefix");
@@ -574,7 +625,7 @@ sub _has_role {
     my $fnret = $this->isExisting();
     $fnret or return $fnret;
 
-    if (OVH::Bastion::is_user_in_group(group => $sysGroup, user => $this->name)) {
+    if (OVH::Bastion::is_user_in_group(group => $sysGroup, user => $this->sysName)) {
         if (!$configList || any { $this->name eq $_ } @{ OVH::Bastion::config($configList)->value || [] }) {
             return R('OK', msg => "Account ".$this->name." is a bastion $role");
         }
@@ -596,17 +647,19 @@ memoize('getGroups');
 sub getGroups {
     my ($this, %p) = @_;
 
-    my $fnret = OVH::Bastion::check_args(\%p, optionalFalseOk => qw{ cache });
-    my $cache = $p{'cache'}; # allow use of sys_getgr_all's cache
+    my $fnret = OVH::Bastion::check_args(\%p,
+        optionalFalseOk => ['cache'] # allow use of sys_getgr_all's cache
+    );
 
-    $this->isExisting() or return;
+    $fnret = $this->isExisting();
+    $fnret or return $fnret;
 
     # we loop through all the system groups to find the ones having user
     # as a member (here, member of the group just means member of the system
     # group, this translate as either "member" or "guest" of the bastion group).
     # for the key* groups, member means aclkeeper, gatekeeper or owner of the
     # corresponding bastion group
-    $fnret = OVH::Bastion::sys_getgr_all(cache => $cache);
+    $fnret = OVH::Bastion::sys_getgr_all(cache => $p{'cache'});
     $fnret or return $fnret;
 
     my %result;
@@ -636,15 +689,15 @@ sub getGroups {
 
 memoize('canExecutePlugin');
 sub canExecutePlugin {
-    my ($this, %params) = @_;
-    my $plugin = $params{'plugin'};
-    my $fnret;
+    my ($this, $plugin, %p) = @_;
+    $p{'plugin'} = $plugin;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ plugin }],
+    );
+    $fnret or return $fnret;
 
-    $this->isExisting() or return;
-
-    if (!$plugin) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory param plugin");
-    }
+    $fnret = $this->isExisting();
+    $fnret or return $fnret;
 
     # sanitize for -T
     my ($sanePlugin) = $plugin =~ /^([a-zA-Z0-9_-]+)$/;
@@ -760,24 +813,5 @@ sub canExecutePlugin {
     # still here ? sorry.
     return R('KO_UNKNOWN_PLUGIN', value => {type => 'open'}, msg => "Unknown command");
 }
-
-=cut
-sub isValidAndExisting {
-    my $this = shift;
-    my %params = @_;
-    my $fnret;
-
-    # return cached Result if we have it
-    $this->_cached() and return;
-
-    $fnret = $this->isValid();
-    $fnret or return $this->_cache($fnret);
-
-    $fnret = $this->isExisting(checkBastionShell => 1, cache => $params{'cache'});
-    $fnret or return $this->_cache($fnret);
-
-    return R('OK');
-}
-=cut
 
 1;

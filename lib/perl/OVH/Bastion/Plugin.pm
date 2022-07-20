@@ -102,7 +102,11 @@ sub begin {
 
     $HOME = OVH::Bastion::get_home_from_env()->value;
     $self = OVH::Bastion::get_user_from_env()->value;
-    $Self = OVH::Bastion::Account->newFromEnv();
+    $Self = OVH::Bastion::Account->newFromEnv(type => 'incoming');
+
+    osh_exit($Self) if (!$Self->isa("OVH::Bastion::Account"));
+    $fnret = $Self->check();
+    $fnret or osh_exit($fnret);
 
     # if we're generating documentation (PLUGIN_DOCGEN is set), leave the BASTION_ACCOUNT placeholder
     if ($_helptext && !$ENV{'PLUGIN_DOCGEN'}) {

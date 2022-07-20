@@ -204,29 +204,29 @@ $fnret or HEXIT($fnret);
 my @todoList = (
     $owner eq $self
     ? (
-        {action => 'add', type => 'owner',      account => $owner},
-        {action => 'add', type => 'aclkeeper',  account => $owner},
-        {action => 'add', type => 'gatekeeper', account => $owner},
-        {action => 'add', type => 'member',     account => $owner},
+        {action => 'add', role => 'owner',      account => $owner},
+        {action => 'add', role => 'aclkeeper',  account => $owner},
+        {action => 'add', role => 'gatekeeper', account => $owner},
+        {action => 'add', role => 'member',     account => $owner},
       )
     : (
-        {action => 'add', type => 'owner',      account => $owner},
-        {action => 'add', type => 'aclkeeper',  account => $owner},
-        {action => 'add', type => 'gatekeeper', account => $owner},
-        {action => 'add', type => 'gatekeeper', account => $self},
-        {action => 'add', type => 'member',     account => $owner},
-        {action => 'del', type => 'gatekeeper', account => $self},
-        {action => 'del', type => 'owner',      account => $self},
+        {action => 'add', role => 'owner',      account => $owner},
+        {action => 'add', role => 'aclkeeper',  account => $owner},
+        {action => 'add', role => 'gatekeeper', account => $owner},
+        {action => 'add', role => 'gatekeeper', account => $self},
+        {action => 'add', role => 'member',     account => $owner},
+        {action => 'del', role => 'gatekeeper', account => $self},
+        {action => 'del', role => 'owner',      account => $self},
     )
 );
 
 foreach my $todo (@todoList) {
     $fnret = OVH::Bastion::Plugin::groupSetRole::act(
-        self           => $self,
+        Self           => $Self,
         account        => $todo->{'account'},
         group          => $shortGroup,
         action         => $todo->{'action'},
-        type           => $todo->{'type'},
+        role           => $todo->{'role'},
         sudo           => 1,
         silentoverride => 1
     );

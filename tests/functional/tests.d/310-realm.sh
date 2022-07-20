@@ -56,7 +56,7 @@ testsuite_realm()
     revoke realmCreate
 
     # add remote bastion ip on group of local bastion
-    success add_remote_bastion_to_group $a0 --osh groupAddServer --host 127.0.0.1 --user realm_$realm_shared_account --port 22 --group $realm_egress_group --kbd-interactive
+    success add_remote_bastion_to_group $a0 --osh groupAddServer --host 127.0.0.1 --user realm_$realm_shared_account --port 22 --group $realm_egress_group --kbd-interactive --force
 
     # attempt inter-realm connection
     success firstconnect1 $a1 realm_$realm_shared_account@127.0.0.1 --kbd-interactive -- $js --osh info

@@ -30,17 +30,17 @@ testsuite_accountinfo()
 
     # a0 should see basic info about a2
     success a0_accountinfo_a2_basic $a0 --osh accountInfo --account $account2
-    json_document '{"error_message":"OK","command":"accountInfo","error_code":"OK","value":{"always_active":1,"is_active":1,"allowed_commands":[],"groups":{}}}'
+    json_document '{"error_message":"OK","command":"accountInfo","error_code":"OK","value":{"always_active":true,"is_active":true,"allowed_commands":[],"groups":{}}}'
 
     # a1 should see detailed info about a2
     success a1_accountinfo_a2_detailed $a1 --osh accountInfo --account $account2
-    json .error_code OK .command accountInfo .value.always_active 1 .value.is_active 1 .value.allowed_commands "[]"
-    json .value.ingress_piv_policy null .value.personal_egress_mfa_required none .value.pam_auth_bypass 0
+    json .error_code OK .command accountInfo .value.always_active true .value.is_active true .value.allowed_commands "[]"
+    json .value.ingress_piv_policy null .value.personal_egress_mfa_required none .value.pam_auth_bypass false
     json .value.password.min_days 0 .value.password.user "$account2" .value.password.password locked
     json .value.password.inactive_days -1 .value.password.date_disabled null .value.password.date_disabled_timestamp 0
-    json .value.ingress_piv_enforced 0 .value.always_active 1 .value.creation_information.by "$account0"
+    json .value.ingress_piv_enforced false .value.always_active true .value.creation_information.by "$account0"
     json .value.creation_information.comment "this is a comment"
-    json .value.already_seen_before 0 .value.last_activity null
+    json .value.already_seen_before false .value.last_activity null
     json .value.max_inactive_days null
     if [ "$OS_FAMILY" = Linux ]; then
         json .value.password.date_changed $(date +%Y-%m-%d)
@@ -52,7 +52,7 @@ testsuite_accountinfo()
 
     # a1 should see the updated fields
     success a1_accountinfo_a2_detailed2 $a1 --osh accountInfo --account $account2
-    json .value.already_seen_before 1
+    json .value.already_seen_before true
     contain "Last seen on"
 
     # try to unlock

@@ -80,13 +80,13 @@ osh_debug("Checking account");
 $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, accountType => $type);
 $fnret or HEXIT($fnret);
 
-my $Account = OVH::Bastion::Account->newFromName($account);    # FIXME accounttype?
+my $Account = OVH::Bastion::Account->newFromName($account, type => ($type eq 'realm' ? 'realm' : 'local'));
 $Account or HEXIT($Account);
 
 $fnret = $Account->isExisting();
 $fnret or HEXIT($fnret);
 
-$account = $Account->name;                                     # untainted
+$account = $Account->name;    # untainted
 
 # FIXME what if we get an account = realm/user?
 

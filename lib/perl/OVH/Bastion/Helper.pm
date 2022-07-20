@@ -66,11 +66,12 @@ $ENV{'PATH'} = '/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:/us
 if (not defined $self) {
     if ($< == 0) {
         $self = 'root';
+        $Self = OVH::Bastion::Account->newLocalRoot();
     }
     else {
         HEXIT('ERR_SUDO_NEEDED', msg => 'This command must be run under sudo');
     }
 }
-$Self = OVH::Bastion::Account->newFromName($self);
+$Self = OVH::Bastion::Account->newFromName($self) if !$Self;
 
 1;

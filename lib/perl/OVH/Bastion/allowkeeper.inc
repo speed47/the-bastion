@@ -181,6 +181,10 @@ sub is_account_valid {
         return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'account'");
     }
 
+    if (ref $account) {
+        die "wow";
+    }
+
     my $whatis = ($accountType eq 'realm' ? "Realm" : "Account");
 
     if ($localOnly && $account =~ m{/}) {

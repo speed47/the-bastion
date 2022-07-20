@@ -863,7 +863,7 @@ if ($osh_command) {
     $osh_command = $legacy2new{$osh_command} if $legacy2new{$osh_command};
 
     # Then test for rights
-    $fnret = $Self->canExecutePlugin(plugin => $osh_command);
+    $fnret = $Self->canExecutePlugin($osh_command);
 
     my $logret = OVH::Bastion::log_access_insert(
         account     => $Self->name,
