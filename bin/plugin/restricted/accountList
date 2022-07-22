@@ -67,7 +67,7 @@ else {
 $fnret or osh_exit $fnret;
 my $accounts = $fnret->value;
 
-if ($audit && !OVH::Bastion::is_auditor(account => $self)) {
+if ($audit && !$Self->isAuditor) {
     osh_exit(R('ERR_PERMISSION_DENIED', msg => "You need to be a bastion auditor to use --audit"));
 }
 

@@ -53,13 +53,9 @@ $fnret or osh_exit $fnret;
 $group = $fnret->value->{'group'};
 my $shortGroup = $fnret->value->{'shortGroup'};
 
-if (
-    !(
-           OVH::Bastion::is_group_member(group => $shortGroup, account => $self)
-        || OVH::Bastion::is_group_aclkeeper(group => $shortGroup, account => $self, superowner => 1)
-        || OVH::Bastion::is_auditor(account => $self)
-    )
-  )
+if (       !OVH::Bastion::is_group_member(group => $shortGroup, account => $Self->name)
+        && !OVH::Bastion::is_group_aclkeeper(group => $shortGroup, account => $Self->name, superowner => 1)
+        && !$Self->isAuditor)
 {
     osh_exit(
         R(

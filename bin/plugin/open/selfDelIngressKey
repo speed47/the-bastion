@@ -41,7 +41,7 @@ if ($fingerprintToDelete and defined $indexToDelete) {
 }
 
 # first, get all the authorized_keys present in the file
-my $allowedKeyFile = $HOME . '/' . OVH::Bastion::AK_FILE;
+my $allowedKeyFile = $Self->home . '/' . OVH::Bastion::AK_FILE;
 $fnret =
   OVH::Bastion::get_authorized_keys_from_file(file => $allowedKeyFile, includeInvalid => 1, includePivDisabled => 1);
 $fnret or osh_exit $fnret;
@@ -59,7 +59,7 @@ foreach my $key (@{$fnret->value || []}) {
 
 # Do we have anything to delete ?
 if (!%validKeys) {
-    warn_syslog("User $self has no valid keys, but somehow connected succcessfully, this shouldn't happen");
+    warn_syslog("User $Self has no valid keys, but somehow connected succcessfully, this shouldn't happen");
     osh_exit 'ERR_NO_KEY', "You have no key to delete (wait, how did you connect in the first place?!)";
 }
 elsif (keys %validKeys == 1) {

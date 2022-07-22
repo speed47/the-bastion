@@ -9,8 +9,11 @@ use Cwd; # getcwd
 use OVH::Bastion;
 use OVH::Result;
 
-use overload
-    '""' => 'name';
+use overload (
+    '""' => 'name',
+    'eq' => 'eq',
+    'ne' => 'ne',
+);
 
 # instantiate a new account corresponding to the one we have here,
 # this in effects nullify all cache handled by memoize for this new instance,
@@ -35,7 +38,6 @@ sub newLocalRoot {
 }
 
 # $name can be "joe" or "realm/joe"
-## no critic(Subroutines::RequireArgUnpacking)
 sub newFromName {
     my ($objectType, $name, %p) = @_;
     $p{'name'} = $name;
@@ -56,7 +58,7 @@ sub newFromName {
         # an isFake account just has a name and doesn't represent any actual bastion account
         $Account = {
             name   => $name,
-            sysName => undef,
+            sysUser => undef,
             isFake => 1,
         };
     }
@@ -70,17 +72,21 @@ sub newFromName {
 
         $Account = {
             name       => $fnret->value->{'account'},           # joe   or acme/joe
-            sysName    => $fnret->value->{'sysaccount'},        # joe   or realm_acme
+            sysUser    => $fnret->value->{'sysaccount'},        # joe   or realm_acme
             remoteName => $fnret->value->{'remoteaccount'},     # undef or joe
             realm      => $fnret->value->{'realm'},             # undef or acme
+
+            home       => '/home/'.$fnret->value->{'sysaccount'}, # isExisting() will yell if /etc/passwd disagrees
             allowkeeperHome => '/home/allowkeeper/'.$fnret->value->{'sysaccount'},
+            passHome        => '/home/'.$fnret->value->{'sysaccount'}.'/pass',
             isFake     => 0,
+
             # an Account instance may or may not actually exist on the system, until
             # ->isExisting() is called. If the account does exist, said func will
             # set the following params:
             uid        => undef,
             gid        => undef,
-            home       => undef, # FIXME shall we force /home/$sysaccount here? and yell in isExisting if passwd disagrees?
+            ttyGroup   => undef,
         };
     }
 
@@ -91,61 +97,41 @@ sub newFromName {
     return $Account;
 }
 
-sub isFake {
-    my $this = shift;
-    return $this->{'isFake'};
-}
+BEGIN {
+    no strict "refs";
 
-sub name {
-    my $this = shift;
-    return $this->{'name'};
-}
-
-sub sysName {
-    my $this = shift;
-    return $this->{'sysName'};
-}
-
-sub remoteName {
-    my $this = shift;
-    return $this->{'remoteName'};
-}
-
-sub realm {
-    my $this = shift;
-    return $this->{'realm'};
-}
-
-sub uid {
-    my $this = shift;
-    if (!defined($this->{'uid'})) {
-        # check for account's existence and fill uid if it's the case
-        $this->isExisting();
+    # simple getters, they have no corresponding setter, as Account objects are immutable
+    foreach my $attr (qw{ isFake name sysUser remoteName realm allowkeeperHome ttyGroup }) {
+        *$attr = sub {
+            my $this = shift;
+            return $this->{$attr};
+        };
     }
-    return $this->{'uid'};
-}
 
-sub gid {
-    my $this = shift;
-    if (!defined($this->{'gid'})) {
-        # check for account's existence and fill gid if it's the case
-        $this->isExisting();
+    # almost-simple getters, they just need to have a completely defined Account, hence
+    # they ensure that ->isExisting has been called first
+    foreach my $attr (qw{ uid gid home }) {
+        *$attr = sub {
+            my $this = shift;
+            if (!defined($this->{$attr})) {
+                # check for account's existence and fill $attr if it's the case
+                $this->isExisting();
+            }
+            return $this->{$attr};
+        };
     }
-    return $this->{'gid'};
+
+    use strict "refs";
 }
 
-sub home {
-    my $this = shift;
-    if (!defined($this->{'home'})) {
-        # check for account's existence and fill home if it's the case
-        $this->isExisting();
-    }
-    return $this->{'home'};
+sub eq {
+    my ($this, $that) = @_;
+    return (ref $this eq ref $that && $this->name eq $that->name);
 }
 
-sub allowkeeperHome {
-    my $this = shift;
-    return $this->{'allowkeeperHome'};
+sub ne {
+    my ($this, $that) = @_;
+    return !($this eq $that);
 }
 
 memoize('getConfig');
@@ -216,7 +202,7 @@ sub isActive {
         return R('ERR_INTERNAL', msg => "The account activeness check program doesn't exist. Report this to sysadmin!");
     }
 
-    $fnret = OVH::Bastion::execute(cmd => [$checkProgram, $this->sysName]);
+    $fnret = OVH::Bastion::execute(cmd => [$checkProgram, $this->sysUser]);
     if (!$fnret) {
         OVH::Bastion::warn_syslog("Failed to execute program '$checkProgram': " . $fnret->msg);
         return $this->_cache(R('ERR_INTERNAL', msg => "The account activeness check program failed. Report this to sysadmin!"));
@@ -322,7 +308,7 @@ sub isNotExpired {
     my $isFirstLogin;
     my $lastlog;
     # XXX HERE
-    my $filepath = sprintf("/home/%s/lastlog%s", $this->sysName, $this->remoteName ? "_".$this->remoteName : ""); # FIXME move login into Account
+    my $filepath = sprintf("/home/%s/lastlog%s", $this->sysUser, $this->remoteName ? "_".$this->remoteName : ""); # FIXME move login into Account
     my $value    = {filepath => $filepath};
     if (-e $filepath) {
         $isFirstLogin = 0;
@@ -339,7 +325,7 @@ sub isNotExpired {
     }
     else {
         my ($previousDir) = getcwd() =~ m{^(/[a-z0-9_./-]+)}i;
-        if (!chdir("/home/".$this->sysName)) {
+        if (!chdir("/home/".$this->sysUser)) {
             OVH::Bastion::osh_debug("is_account_nonexpired: no exec access to the folder!");
             return R('ERR_NO_ACCESS', msg => "No read access to this account folder to compute last login time");
         }
@@ -352,7 +338,7 @@ sub isNotExpired {
             $lastlog = $fnret->value;
             OVH::Bastion::osh_debug("is_account_nonexpired: got creation date from config.creation_timestamp: $lastlog");
         }
-        elsif (-e sprintf("/home/%s/accountCreate.comment", $this->sysName)) {
+        elsif (-e sprintf("/home/%s/accountCreate.comment", $this->sysUser)) {
 
             # fall back to the stat of the accountCreate.comment file
             $lastlog = (stat(_))[9];
@@ -360,7 +346,7 @@ sub isNotExpired {
         }
         else {
             # last fall back to the stat of the ttyrec/ folder
-            $lastlog = (stat(sprintf("/home/%s/ttyrec", $this->sysName)))[9];
+            $lastlog = (stat(sprintf("/home/%s/ttyrec", $this->sysUser)))[9];
             OVH::Bastion::osh_debug("is_account_nonexpired: got creation date from ttyrec/ stat: $lastlog");
         }
     }
@@ -409,19 +395,19 @@ sub isExisting {
 
     my %entry;
     if (OVH::Bastion::is_mocking()) {
-        my @fields = OVH::Bastion::mock_get_account_entry(account => $this->sysName);
+        my @fields = OVH::Bastion::mock_get_account_entry(account => $this->sysUser);
         %entry = (
             name   => $fields[0],
             passwd => $fields[1],
             uid    => $fields[2],
             gid    => $fields[3],
             gcos   => $fields[4],
-            dir    => $fields[5],
+            home   => $fields[5],
             shell  => $fields[6],
         );
     }
     else {
-        my $fnret = OVH::Bastion::sys_getpw_name(name => $this->sysName, cache => !$p{'nocache'});
+        my $fnret = OVH::Bastion::sys_getpw_name(name => $this->sysUser, cache => !$p{'nocache'});
         if ($fnret) {
             %entry = %{$fnret->value};
         }
@@ -438,14 +424,24 @@ sub isExisting {
             return R('KO_NOT_FOUND', msg => sprintf("Account '%s' doesn't exist", $this->name));
         }
 
-        my ($newdir) = $entry{'dir'} =~ m{([/a-zA-Z0-9._-]+)};                   # untaint
-        if ($newdir ne $entry{'dir'}) {
+        my ($newdir) = $entry{'home'} =~ m{([/a-zA-Z0-9._-]+)};                   # untaint
+        if ($newdir ne $entry{'home'}) {
             return R('ERR_SECURITY_VIOLATION', msg => "Forbidden characters in account home directory")
         }
-        $entry{'dir'} = $newdir;                                                 # untaint
+        $entry{'home'} = $newdir;
 
-        $entry{'home'} = $entry{'dir'};
-        foreach my $key (qw{ uid gid home }) {
+        if ($entry{'home'} ne $this->home) {
+            warn_syslog(sprintf("Account %s home is '%s' instead of '%s'", $this->name, $entry{'home'}, $this->home);
+            return R('ERR_SECURITY_VIOLATION', msg => "Mismatch between theoretical and actual home location");
+        }
+
+        $entry{'ttyGroup'} = $this->sysUser."-tty";
+        if (!getgrnam($entry{'ttyGroup'})) {
+            # no corresponding tty group? hmm, weird, but not fatal...
+            $entry{'ttyGroup'} = undef;
+        }
+
+        foreach my $key (qw{ uid gid home ttyGroup }) {
             unlock_ref_value($this, $key);
             $this->{$key} = $entry{$key};
             lock_ref_value($this, $key);
@@ -457,24 +453,54 @@ sub isExisting {
 }
 
 # checks that isExisting() and potentially other tiny things to ensure the account is sane
-# do NOT memoize this one, as we're looking at global env and $<, we memoize _check() instead
-sub check {
+# do NOT memoize this one, as we're looking at global env and $<, we memoize check() instead,
+# which is generic for all accounts (not only for the account that is running the code)
+sub selfCheck {
     my ($this, %p) = @_;
+    my $fnret;
 
     # if we are manipulating the a localRoot account, and we're running under root
     # privileges without sudo, then deem this account as valid so that scripts running
-    # directly under root (such as the install script) find that $Self is valid and carry on
-    # We don't memoize this func because of this 'if'.
+    # directly under root (such as the install script) find that $this is valid and carry on
     if ($this->name eq '<root>' && $this->isFake && $< == 0 && !$ENV{'SUDO_USER'}) {
         return R('OK');
     }
 
-    # the logic of this func can be memoized, see below
-    return $this->_check();
+    # this should always be set
+    if (!$ENV{'USER'}) {
+        OVH::Bastion::warn_syslog("Unset USER envvar while checking account ".$this->name);
+        return R('KO_INVALID_ACCOUNT', msg => "Your USER envvar is not set");
+    }
+
+    # run the rest of the logic that is common for other accounts that are not "us"
+    $fnret = $this->check();
+    $fnret or return $fnret;
+
+    # do NOT do this check before calling ->check() because the latter is responsible for
+    # calling ->isExisting which in turn ensures that sysUser is set up accordingly
+    if ($ENV{'SUDO_USER'}) {
+        if ($this->sysUser ne $ENV{'SUDO_USER'}) {
+            OVH::Bastion::warn_syslog(sprintf(
+                "Mismatching SUDO8USER envvar '%s' while checking account '%s' with sysUser '%s'",
+                $ENV{'SUDO_USER'}, $this->name, $this->sysUser
+            ));
+            return R('KO_INVALID_ACCOUNT', msg => "Your SUDO_USER envvar doesn't match your system account $ENV{'SUDO_USER'} and ".$this->sysUser); # FIXME remove the verbose MIGRA
+        }
+    }
+    elsif ($this->sysUser ne $ENV{'USER'}) {
+        OVH::Bastion::warn_syslog(sprintf(
+            "Mismatching USER envvar '%s' while checking account '%s' with sysUser '%s'",
+            $ENV{'USER'}, $this->name, $this->sysUser
+        ));
+        return R('KO_INVALID_ACCOUNT', msg => "Your USER envvar doesn't match your system account $ENV{'USER'} and ".$this->sysUser);
+    }
+
+    return R('OK');
 }
 
-memoize('_check');
-sub _check {
+# checks that isExisting() and potentially other tiny things to ensure the account is sane
+memoize('check');
+sub check {
     my ($this, %p) = @_;
     my $fnret;
 
@@ -625,7 +651,7 @@ sub _has_role {
     my $fnret = $this->isExisting();
     $fnret or return $fnret;
 
-    if (OVH::Bastion::is_user_in_group(group => $sysGroup, user => $this->sysName)) {
+    if (OVH::Bastion::is_user_in_group(group => $sysGroup, user => $this->sysUser)) {
         if (!$configList || any { $this->name eq $_ } @{ OVH::Bastion::config($configList)->value || [] }) {
             return R('OK', msg => "Account ".$this->name." is a bastion $role");
         }
@@ -665,7 +691,7 @@ sub getGroups {
     my %result;
     foreach my $sysgroup (keys %{$fnret->value}) {
         # we must be a member of this sysgroup
-        next if (none { $this->sysName eq $_ } @{ $fnret->value->{$sysgroup}->{'members'} });
+        next if (none { $this->sysUser eq $_ } @{ $fnret->value->{$sysgroup}->{'members'} });
 
         ## no critic(RegularExpressions::ProhibitUnusedCapture) # false positive
         if ($sysgroup =~ /^key(?<groupname>.+?)(-(?<type>gatekeeper|aclkeeper|owner))?$/) {
@@ -674,7 +700,7 @@ sub getGroups {
             if (!$type) {
                 # member or guest?
                 my $prefix = $this->remoteName ? "allowed_".$this->remoteName : "allowed";
-                if (-l sprintf("/home/allowkeeper/%s/%s.ip.%s", $this->sysName, $prefix, $groupname)) {
+                if (-l sprintf("%s/%s.ip.%s", $this->allowkeeperHome, $prefix, $groupname)) {
                     $type = 'member';
                 }
                 else {
@@ -781,7 +807,7 @@ sub canExecutePlugin {
 
     # restricted plugins (osh-* system groups based)
     if (-f ($path_plugin . '/restricted/' . $plugin)) {
-        if (OVH::Bastion::is_user_in_group(user => $this->sysName, group => "osh-$plugin", cache => 1)) {
+        if (OVH::Bastion::is_user_in_group(user => $this->sysUser, group => "osh-$plugin", cache => 1)) {
             return R('OK',
                 value => {fullpath => $path_plugin . '/restricted/' . $plugin, type => 'restricted', plugin => $plugin}
             );

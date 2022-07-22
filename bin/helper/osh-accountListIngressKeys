@@ -47,7 +47,7 @@ if ($self eq 'root') {
 else {
     # need to perform another security check
     $fnret = OVH::Bastion::is_user_in_group(
-        user  => $self,
+        user  => $Self->sysUser,
         group => ($account eq 'root' ? "osh-rootListIngressKeys" : "osh-accountListIngressKeys")
     );
     if (!$fnret) {
@@ -60,11 +60,15 @@ else {
 #>PARAMS:ACCOUNT
 osh_debug("Checking account");
 my $accounthome;
+my $Account;
 if ($account ne 'root') {
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-    $fnret or HEXIT($fnret);
-    $account     = $fnret->value->{'account'};    # untainted
-    $accounthome = $fnret->value->{'dir'};
+    $Account = OVH::Bastion::Account->newFromName($account);
+    $Account or HEXIT($Account);
+
+    $fnret = $Account->check();
+    $fnret or return $fnret;
+
+    $accounthome = $Account->home;
 }
 else {
     $account     = 'root';

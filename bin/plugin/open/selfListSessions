@@ -82,7 +82,7 @@ $allowedParam = 1 if $allowed;
 $allowedParam = 0 if $denied;
 
 $fnret = OVH::Bastion::log_access_get(
-    account     => $self,
+    account     => $Self->name,
     uniqid      => $id,
     cmdtype     => $type,
     after       => $afterTimestamp,

@@ -29,7 +29,7 @@ testsuite_realm()
     grant groupCreate
 
     # create realm-egress group on local bastion
-    success create_support_group $a0 --osh groupCreate --group $realm_egress_group --owner $account0 --algo rsa --size 4096
+    success create_support_group $a0 --osh groupCreate --group $realm_egress_group --owner $account0 --algo ed25519
     local realm_group_key
     realm_group_key=$(get_json | $jq '.value.public_key.line')
 
@@ -60,11 +60,11 @@ testsuite_realm()
 
     # attempt inter-realm connection
     success firstconnect1 $a1 realm_$realm_shared_account@127.0.0.1 --kbd-interactive -- $js --osh info
-    json .value.account $account1 .value.realm $realm_shared_account
+    json .value.account.name "$realm_shared_account/$account1" .value.account.realm $realm_shared_account .value.account.remote_account "$account1"
 
     # attempt inter-realm connection
     success firstconnect2 $a2 realm_$realm_shared_account@127.0.0.1 --kbd-interactive -- $js --osh info
-    json .value.account $account2 .value.realm $realm_shared_account
+    json .value.account.name "$realm_shared_account/$account2" .value.account.realm $realm_shared_account .value.account.remote_account "$account2"
 
     # try forbidden plugins
     for plugin in selfAddPersonalAccess selfAddIngressKey selfDelIngressKey selfGenerateEgressKey selfAddPersonalAccess selfDelPersonalAccess selfPlaySession selfListSessions selfResetIngressKeys

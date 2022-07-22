@@ -42,7 +42,7 @@ if (ref $remainingOptions eq 'ARRAY' and @$remainingOptions) {
 #
 my $fnret;
 
-my $pivEffectivePolicyEnabled = OVH::Bastion::is_effective_piv_account_policy_enabled(account => $self);
+my $pivEffectivePolicyEnabled = OVH::Bastion::is_effective_piv_account_policy_enabled(account => $Self->name);
 
 # before requesting the ssh pubkey, if we have to do PIV, check we have the piv helper
 if (!OVH::Bastion::has_piv_helper()) {
@@ -52,7 +52,7 @@ if (!OVH::Bastion::has_piv_helper()) {
               "This bastion doesn't have PIV capabilities due to missing prerequisites. Please retry without --piv.");
     }
     elsif ($pivEffectivePolicyEnabled) {
-        warn_syslog("selfAddIngressKey: $self is required to use PIV keys but we're missing the PIV helper");
+        warn_syslog("selfAddIngressKey: ".$Self->name." is required to use PIV keys but we're missing the PIV helper");
         osh_exit R('KO_PIV_NOT_AVAILABLE',
             msg =>
               "You are required per the bastion policy to only use PIV keys but we're missing some prerequisites to validate PIV keys. "
@@ -104,7 +104,7 @@ if (!$fnret) {
 }
 my $key = $fnret->value;
 
-my $allowedKeyFile = $HOME . '/' . OVH::Bastion::AK_FILE;
+my $allowedKeyFile = $Self->home . '/' . OVH::Bastion::AK_FILE;
 if (checkExistKey($key->{'base64'})) {
     osh_exit R('KO_DUPLICATE_KEY', msg => "This public key already exists on your account!", value => {key => $key});
 }
@@ -156,7 +156,7 @@ $fnret = OVH::Bastion::get_from_for_user_key(userProvidedIpList => $key->{'fromL
 $fnret or osh_exit $fnret;
 
 $key->{'info'} = sprintf("ADDED_BY=%s USING=%s UNIQID=%s TIMESTAMP=%s DATETIME=%s VERSION=%s",
-    $self, $scriptName, $ENV{'UNIQID'}, time(), DateTime->now(), $OVH::Bastion::VERSION);
+    $Self->name, $scriptName, $ENV{'UNIQID'}, time(), DateTime->now(), $OVH::Bastion::VERSION);
 
 $fnret = OVH::Bastion::add_key_to_authorized_keys_file(file => $allowedKeyFile, key => $key);
 $fnret or osh_exit $fnret;

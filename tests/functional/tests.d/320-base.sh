@@ -45,7 +45,7 @@ testsuite_base()
     contain "Your alias to connect"
     contain "My admins are: "
     contain "My super owners are: "
-    json .error_code OK .command info .value.account $account1 .value.adminAccounts '["'"$account0"'"]'
+    json .error_code OK .command info .value.account.name $account1 .value.configuration.admins '["'"$account0"'"]'
 
 
     # now check that regular user do not see admins list
@@ -53,7 +53,7 @@ testsuite_base()
     contain "Your alias to connect"
     nocontain "My admins are: "
     nocontain "My super owners are: "
-    json .error_code OK .command info .value.account $account0
+    json .error_code OK .command info .value.account.name $account0
 
     # delete account1
     grant accountDelete

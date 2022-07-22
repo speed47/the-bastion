@@ -42,7 +42,7 @@ $fnret or osh_exit($fnret);
 $group = $fnret->value->{'group'};
 my $shortGroup = $fnret->value->{'shortGroup'};
 
-if (!OVH::Bastion::is_group_owner(account => $self, group => $shortGroup, superowner => 1)) {
+if (!OVH::Bastion::is_group_owner(account => $Self->name, group => $shortGroup, superowner => 1)) {
     osh_exit 'ERR_NOT_GROUP_OWNER', "You must be an owner to delete an egress group key";
 }
 

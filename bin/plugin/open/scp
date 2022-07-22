@@ -26,7 +26,7 @@ sub help {
     $config or osh_exit $config;
     my $bastionCommand = $config->value->{'bastionCommand'};
     my $bastionName    = $config->value->{'bastionName'};
-    $bastionCommand =~ s/USER|ACCOUNT/$self/g;
+    $bastionCommand =~ s/USER|ACCOUNT/$Self->name/ge;
     $bastionCommand =~ s/CACHENAME|BASTIONNAME/$bastionName/g;
     my $hostname = Sys::Hostname::hostname();
     $bastionCommand =~ s/HOSTNAME/$hostname/g;
@@ -108,7 +108,7 @@ if (not $ip) {
 my $machine = $ip;
 $machine = "$user\@$ip" if $user;
 $port ||= 22;       # scp uses 22 if not specified, so we need to test access to that port and not any port (aka undef)
-$user ||= $self;    # same for user
+$user ||= $Self->sysUser;    # same for user
 $machine .= ":$port";
 
 # decode the passed scp command
@@ -124,9 +124,9 @@ if ($decoded !~ /^(?:scp )(?:.*)-([tf]) (?:.+)$/) {
 my $userToCheck = $1 eq 't' ? '!scpupload' : '!scpdownload';    ## no critic (CaptureWithoutTest) ## false positive
 
 my %keys;
-osh_debug("Checking access 1/2 of $self to $machine...");
+osh_debug("Checking access 1/2 of $Self to $machine...");
 $fnret = OVH::Bastion::is_access_granted(
-    account => $self,
+    account => $Self->name,
     user    => $user,
     ipfrom  => $ENV{'OSH_IP_FROM'},
     ip      => $ip,
@@ -148,9 +148,9 @@ foreach my $access (@{$fnret->value || []}) {
     }
 }
 
-osh_debug("Checking access 2/2 of $self to $userToCheck of $machine...");
+osh_debug("Checking access 2/2 of $Self to $userToCheck of $machine...");
 $fnret = OVH::Bastion::is_access_granted(
-    account        => $self,
+    account        => $Self->name,
     user           => $userToCheck,
     ipfrom         => $ENV{'OSH_IP_FROM'},
     ip             => $ip,
@@ -211,7 +211,7 @@ if (defined $additionalParams)
 push @cmd, '-t', "\Q$remoteFile\E";
 =cut
 
-print STDERR ">>> Hello $self, transferring your file through the bastion "
+print STDERR ">>> Hello $Self, transferring your file through the bastion "
   . ($userToCheck eq '!scpupload' ? 'to' : 'from')
   . " $machine...\n";
 

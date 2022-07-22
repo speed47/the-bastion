@@ -33,7 +33,7 @@ $fnret or osh_exit $fnret;
 
 my $from = 'from="' . join(',', @{$fnret->value}) . '"';
 
-$fnret = OVH::Bastion::get_personal_account_keys(account => $sysself);
+$fnret = OVH::Bastion::get_personal_account_keys(account => $Self->sysUser);
 $fnret or osh_exit $fnret;
 
 osh_info "You can copy one of those keys to a remote machine to get access to it through your account";

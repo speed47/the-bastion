@@ -88,7 +88,7 @@ sub preconditions {
              # FIXME still needed?
     }
     else {
-        $fnret = $Self->check();
+        $fnret = $Self->selfCheck();
         $fnret or return $fnret;
     }
 

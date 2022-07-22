@@ -53,7 +53,7 @@ $account = $fnret->value->{'account'};
 $fnret = OVH::Bastion::get_acls(account => $account);
 $fnret or osh_exit $fnret;
 
-if (!OVH::Bastion::is_auditor(account => $self)) {
+if (!$Self->isAuditor) {
     osh_info "NOTE: you're not a bastion auditor, hence you won't be able to";
     osh_info "see access lists of groups you're not yourself a member of.";
     osh_info ' ';

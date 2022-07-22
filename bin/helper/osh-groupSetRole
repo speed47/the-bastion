@@ -106,8 +106,8 @@ osh_debug("going to $action account $Account to/from $groupName");
 $fnret = R('OK', silent => 1);
 if ($action eq 'add') {
 
-    if (!OVH::Bastion::is_user_in_group(user => $Account->sysName, group => $groupName)) {
-        $fnret = OVH::Bastion::sys_addmembertogroup(group => $groupName, user => $Account->sysName, noisy_stderr => 1);
+    if (!OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => $groupName)) {
+        $fnret = OVH::Bastion::sys_addmembertogroup(group => $groupName, user => $Account->sysUser, noisy_stderr => 1);
     }
 }
 elsif ($action eq 'del') {
@@ -133,7 +133,7 @@ elsif ($action eq 'del') {
     }
     if (!$otherMembers) {
         $fnret =
-          OVH::Bastion::sys_delmemberfromgroup(group => $groupName, user => $Account->sysName, noisy_stderr => 1);
+          OVH::Bastion::sys_delmemberfromgroup(group => $groupName, user => $Account->sysUser, noisy_stderr => 1);
     }
 }
 else {

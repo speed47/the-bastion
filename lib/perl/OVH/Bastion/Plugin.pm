@@ -15,8 +15,8 @@ $SIG{'PIPE'} = 'IGNORE';    # continue even if osh_info gets a SIGPIPE because t
 $| = 1;
 
 use Exporter 'import';
-our ($user, $ip, $host, $port, $scriptName, $Self, $self, $sysself, $realm, $remoteself, $HOME, $savedArgs); ## no critic (ProhibitPackageVars)
-our @EXPORT = qw( $user $ip $host $port $scriptName $Self $self $sysself $realm $remoteself $HOME $savedArgs ); ## no critic (ProhibitAutomaticExportation)
+our             ( $Self,$user,$ip,$host,$port,$scriptName,$savedArgs ); ## no critic (ProhibitPackageVars)
+our @EXPORT = qw( $Self $user $ip $host $port $scriptName $savedArgs ); ## no critic (ProhibitAutomaticExportation)
 our @EXPORT_OK = qw( help );
 
 my $_helptext;
@@ -100,17 +100,15 @@ sub begin {
     $ENV{'PATH'}        = '/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/pkg/bin';
     $ENV{'PLUGIN_NAME'} = $scriptName;
 
-    $HOME = OVH::Bastion::get_home_from_env()->value;
-    $self = OVH::Bastion::get_user_from_env()->value;
     $Self = OVH::Bastion::Account->newFromEnv(type => 'incoming');
 
     osh_exit($Self) if (!$Self->isa("OVH::Bastion::Account"));
-    $fnret = $Self->check();
+    $fnret = $Self->selfCheck();
     $fnret or osh_exit($fnret);
 
     # if we're generating documentation (PLUGIN_DOCGEN is set), leave the BASTION_ACCOUNT placeholder
     if ($_helptext && !$ENV{'PLUGIN_DOCGEN'}) {
-        $_helptext =~ s/BASTION_ACCOUNT/$self/g;
+        $_helptext =~ s/BASTION_ACCOUNT/$Self->name/ge;
     }
 
     osh_header($header) if $header;
@@ -124,32 +122,6 @@ sub begin {
     if ($ENV{'PLUGIN_HELP'}) {
         $helpfunc->();
         osh_exit;
-    }
-
-    $fnret =
-      OVH::Result::R('OK', value => {sysaccount => $self, account => $self, realm => undef, remoteaccount => undef});
-    if ($< == 0) {
-        ;    # called by root, don't verify if it's a bastion account (because it's not)
-    }
-    elsif ($self =~ /^realm_([a-zA-Z0-9_.-]+)/) {
-        $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => "$1/" . $ENV{'LC_BASTION'});
-        $fnret or osh_exit('ERR_INVALID_ACCOUNT', "The realm-scoped account is invalid (" . $fnret->msg . ")");
-    }
-    else {
-        $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $self);
-        $fnret or osh_exit('ERR_INVALID_ACCOUNT', "The account is invalid (" . $fnret->msg . ")");
-    }
-    $sysself    = $fnret->value->{'sysaccount'};
-    $self       = $fnret->value->{'account'};
-    $realm      = $fnret->value->{'realm'};
-    $remoteself = $fnret->value->{'remoteaccount'};
-
-    if (not(-d -r $HOME)) {
-        osh_exit 'ERR_MISSING_HOME', "Error with your HOME directory ($HOME), please report to your sysadmin.";
-    }
-    if ($sysself ne $ENV{'USER'}) {
-        osh_exit 'ERR_INVALID_USER',
-          "Error with your USER (\"$sysself\" vs \"$ENV{'USER'}\"), please report to your sysadmin.";
     }
 
     # only unparsed options are remaining there

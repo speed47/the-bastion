@@ -101,7 +101,7 @@ my $bastionName = $config->{'bastionName'};
 my $osh_debug   = $config->{'debug'};
 
 # check for account existence and validity
-$fnret = $Self->check();
+$fnret = $Self->selfCheck();
 if (!$fnret) {
     main_exit(OVH::Bastion::EXIT_ACCOUNT_INVALID, "account_invalid", "The account is invalid (" . $fnret->msg . ")");
 }
@@ -222,7 +222,7 @@ $ENV{'OSH_DEBUG'} = 1 if $osh_debug;
 osh_debug(
     sprintf(
         "self=%s home=%s realm=%s remoteself=%s sysself=%s",
-        $Self->name, $Self->home, $Self->realm, $Self->remoteName, $Self->sysName
+        $Self->name, $Self->home, $Self->realm, $Self->remoteName, $Self->sysUser
     )
 );
 osh_debug("user-passed options : $realOptions");
@@ -654,17 +654,17 @@ $ENV{'OSH_KBD_INTERACTIVE'} = 1 if $userKbdInteractive; # useful for plugins tha
 # MFA enforcing for ingress connection, either on global bastion config, or on specific account config
 my $mfaPolicy = OVH::Bastion::config('accountMFAPolicy')->value;
 my $isMfaPasswordConfigured =
-  OVH::Bastion::is_user_in_group(account => $Self->sysName, group => OVH::Bastion::MFA_PASSWORD_CONFIGURED_GROUP);
+  OVH::Bastion::is_user_in_group(account => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_CONFIGURED_GROUP);
 my $isMfaTOTPConfigured =
-  OVH::Bastion::is_user_in_group(account => $Self->sysName, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP);
+  OVH::Bastion::is_user_in_group(account => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP);
 my $isMfaPasswordRequired =
-  OVH::Bastion::is_user_in_group(account => $Self->sysName, group => OVH::Bastion::MFA_PASSWORD_REQUIRED_GROUP);
+  OVH::Bastion::is_user_in_group(account => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_REQUIRED_GROUP);
 my $hasMfaPasswordBypass =
-  OVH::Bastion::is_user_in_group(account => $Self->sysName, group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP);
+  OVH::Bastion::is_user_in_group(account => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP);
 my $isMfaTOTPRequired =
-  OVH::Bastion::is_user_in_group(account => $Self->sysName, group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP);
+  OVH::Bastion::is_user_in_group(account => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP);
 my $hasMfaTOTPBypass =
-  OVH::Bastion::is_user_in_group(account => $Self->sysName, group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP);
+  OVH::Bastion::is_user_in_group(account => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP);
 
 # MFA information from a potential ingress realm:
 my $remoteMfaValidated = 0;
@@ -1067,7 +1067,7 @@ if (!$quiet) {
 
 # if no user yet, fix it to remote user
 # do that here, cause sometimes we do not want to pass user to osh
-$user = $user || $config->{'defaultLogin'} || $Self->remoteName || $Self->sysName;
+$user = $user || $config->{'defaultLogin'} || $Self->remoteName || $Self->sysUser;
 
 # log request
 osh_debug("final request : " . "$user\@$ip -p $port -- $command'\n");
@@ -1172,7 +1172,7 @@ if ($userPasswordClue) {
     $fnret = OVH::Bastion::get_passfile(
         hint      => $userPasswordClue,
         context   => $userPasswordContext,
-        self      => ($Self->remoteName || $Self->sysName),
+        self      => ($Self->remoteName || $Self->sysUser),
         tryLegacy => 1
     );
     if (!$fnret) {

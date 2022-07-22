@@ -38,11 +38,11 @@ if (not $account) {
 
 #>PARAMS:ACCOUNT
 osh_debug("Checking account");
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret or HEXIT($fnret);
-$account = $fnret->value->{'account'};    # untainted
-my $home = $fnret->value->{'dir'};
+my $Account = OVH::Bastion::Account->newFromName($account);
+$Account or HEXIT($Account);
 
+$fnret = $Account->check();
+$fnret or return $fnret;
 #<PARAMS:ACCOUNT
 
 #>RIGHTSCHECK
@@ -51,17 +51,17 @@ if ($self eq 'root') {
 }
 
 # special case for self: if account==self, then is ok
-elsif ($self ne $account) {
-    $fnret = OVH::Bastion::is_user_in_group(user => $self, group => "osh-accountMFAResetTOTP");
+elsif ($Self->name ne $Account->name) {
+    $fnret = OVH::Bastion::is_user_in_group(user => $Self->sysUser, group => "osh-accountMFAResetTOTP");
     if (!$fnret) {
-        HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $self");
+        HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $Self");
     }
 }
 
 #<RIGHTSCHECK
 
 # don't allow a non-admin to reset the TOTP of an admin
-if (OVH::Bastion::is_admin(account => $account, sudo => 1) && !OVH::Bastion::is_admin(account => $self, sudo => 1)) {
+if ($Account->isAdmin(sudo => 1) && !$Self->isAdmin(sudo => 1)) {
     HEXIT('ERR_SECURITY_VIOLATION', msg => "You can't reset the TOTP of an admin without being admin yourself");
 }
 
@@ -72,7 +72,7 @@ if ($TOTPProvider eq 'none') {
 elsif ($TOTPProvider eq 'google-authenticator') {
 
     # for google-authenticator, attempt remove the .otp file (non-fatal)
-    if (!unlink($home . '/' . OVH::Bastion::TOTP_GAUTH_FILENAME)) {
+    if (!unlink($Account->home . '/' . OVH::Bastion::TOTP_GAUTH_FILENAME)) {
         warn_syslog("Couldn't remove the TOTP file ($!), this is not fatal, continuing anyway");
     }
 }
@@ -87,12 +87,12 @@ else {
 }
 
 # remove the user from the TOTP configured group
-if (OVH::Bastion::is_user_in_group(user => $account, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP)) {
-    $fnret = OVH::Bastion::sys_delmemberfromgroup(user => $account, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP);
+if (OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP)) {
+    $fnret = OVH::Bastion::sys_delmemberfromgroup(user => $Account->sysUser, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP);
     $fnret or HEXIT($fnret);
 }
 
 osh_info "TOTP has been reset, "
-  . ($account eq $self ? 'you' : $account)
+  . ($Account->name eq $Self->name ? 'you' : $Account)
   . " can re-enroll by using the `--osh selfMFASetupTOTP' command, if applicable";
 HEXIT('OK');

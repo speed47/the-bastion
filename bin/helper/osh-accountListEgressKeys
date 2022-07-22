@@ -53,10 +53,11 @@ else {
 
 #>PARAMS:ACCOUNT
 osh_debug("Checking account");
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret or HEXIT($fnret);
-$account = $fnret->value->{'account'};    # untainted
+my $Account = OVH::Bastion::Account->newFromName($account);
+$Account or HEXIT($Account);
 
+$fnret = $Account->check();
+$fnret or return $fnret;
 #<PARAMS:ACCOUNT
 
-HEXIT(OVH::Bastion::get_personal_account_keys(account => $account));
+HEXIT(OVH::Bastion::get_personal_account_keys(account => $Account->name));

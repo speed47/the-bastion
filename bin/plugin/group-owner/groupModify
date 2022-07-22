@@ -71,7 +71,7 @@ $fnret or osh_exit $fnret;
 $group = $fnret->value->{'group'};
 my $shortGroup = $fnret->value->{'shortGroup'};
 
-$fnret = OVH::Bastion::is_group_owner(account => $self, group => $shortGroup, superowner => 1);
+$fnret = OVH::Bastion::is_group_owner(account => $Self->name, group => $shortGroup, superowner => 1);
 if (!$fnret) {
     osh_exit 'ERR_NOT_GROUP_OWNER', "You must be an owner to modify this group";
 }

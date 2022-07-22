@@ -72,11 +72,11 @@ osh_info "Group "
   . $shortGroup
   . "'s GateKeepers (managing the members/guests list) are: "
   . colored(@{$roles{'gatekeeper'}} ? join(" ", sort @{$roles{'gatekeeper'}}) : '-', "red");
-if (   OVH::Bastion::is_group_owner(group => $shortGroup, account => $self, superowner => 1)
-    || OVH::Bastion::is_group_gatekeeper(group => $shortGroup, account => $self)
-    || OVH::Bastion::is_group_aclkeeper(group => $shortGroup, account => $self)
-    || OVH::Bastion::is_group_member(group => $shortGroup, account => $self)
-    || OVH::Bastion::is_auditor(account => $self))
+if (   OVH::Bastion::is_group_owner(group => $shortGroup, account => $Self->name, superowner => 1)
+    || OVH::Bastion::is_group_gatekeeper(group => $shortGroup, account => $Self->name)
+    || OVH::Bastion::is_group_aclkeeper(group => $shortGroup, account => $Self->name)
+    || OVH::Bastion::is_group_member(group => $shortGroup, account => $Self->name)
+    || OVH::Bastion::is_auditor(account => $Self->name))
 {
 
     osh_info "Group "

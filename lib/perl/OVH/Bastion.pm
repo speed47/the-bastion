@@ -843,11 +843,11 @@ sub do_pamtester {
         if (OVH::Bastion::is_freebsd()) {
             $pamsysret = system(
                 'sudo',         '-n',        '-u',   'root',         '--',
-                '/usr/bin/env', 'pamtester', 'sshd', $Self->sysName, 'authenticate'
+                '/usr/bin/env', 'pamtester', 'sshd', $Self->sysUser, 'authenticate'
             );
         }
         else {
-            $pamsysret = system('pamtester', 'sshd', $Self->sysName, 'authenticate');
+            $pamsysret = system('pamtester', 'sshd', $Self->sysUser, 'authenticate');
         }
         if ($pamsysret < 0) {
             return R('KO_MFA_FAILED',

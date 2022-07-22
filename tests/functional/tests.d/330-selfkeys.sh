@@ -563,7 +563,7 @@ EOS
 
     success user1key2aftereadd $a1k2 -osh info
     contain "Your alias to connect"
-    json .command info .error_code OK .value.account $account1
+    json .command info .error_code OK .value.account.name $account1
 
     success key2 $a1k2 -osh selfDelIngressKey -f "$account1key2fp"
     json .command selfDelIngressKey .error_code OK .value.deleted_key.err OK

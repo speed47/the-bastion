@@ -31,36 +31,46 @@ my $config = $fnret->value;
 
 my %ret;
 
-my $selfdisplay = $remoteself ? $remoteself : $self;
-$ret{'account'} = $selfdisplay;
-osh_info "You are " . colored($selfdisplay, 'green');
-if ($realm) {
-    osh_info "You are a citizen of a distant realm named " . colored($realm, 'green');
-    $ret{'realm'} = $realm;
+$ret{'account'} = {
+    name => $Self->name,
+    remote_account => $Self->remoteName,
+    realm => $Self->realm
+};
+osh_info "You are " . colored($Self->remoteName || $Self->name, 'green');
+
+if ($Self->realm) {
+    osh_info "You are a citizen of a distant realm named " . colored($Self->realm, 'green');
 }
+
+$ret{'account'}{'is_auditor'} = $Self->isAuditor->toJsonBool();
 if ($Self->isAuditor) {
-    $ret{'is_auditor'} = 1;
     osh_info "You are a " . colored('bastion auditor!', 'green');
 }
+
+$ret{'account'}{'is_super_owner'} = $Self->isSuperOwner->toJsonBool();
 if ($Self->isSuperOwner) {
-    $ret{'is_superowner'} = 1;
-    osh_info "Look at you, you are a " . colored('bastion superowner!', 'green');
+    osh_info "Look at you, you are a " . colored('bastion super owner!', 'green');
 }
+
+$ret{'account'}{'is_admin'} = $Self->isAdmin->toJsonBool();
 if ($Self->isAdmin) {
-    $ret{'is_admin'} = 1;
     osh_info "Woosh, you are even a " . colored('bastion admin!', 'green');
 }
 
-if (!$realm) {
+if (!$Self->realm) {
     osh_info "\nYour alias to connect to this bastion is:";
-    my $bastionName    = OVH::Bastion::config('bastionName')->value();
+
     my $bastionCommand = OVH::Bastion::config('bastionCommand')->value();
-    $bastionCommand =~ s/USER|ACCOUNT/$self/g;
+    $bastionCommand =~ s/USER|ACCOUNT/$Self->name/ge;
+
+    my $bastionName    = OVH::Bastion::config('bastionName')->value();
     $bastionCommand =~ s/CACHENAME|BASTIONNAME/$bastionName/g;
+
     my $hostname = Sys::Hostname::hostname();
     $bastionCommand =~ s/HOSTNAME/$hostname/g;
+
     osh_info colored("alias $bastionName='$bastionCommand'", "magenta");
-    $ret{'bastion_alias_command'} = $bastionCommand;
+    $ret{'account'}{'bastion_alias_command'} = $bastionCommand;
 
     if (OVH::Bastion::config('moshAllowed')->value) {
         osh_info "Your alias to connect to this bastion with MOSH is:";
@@ -69,62 +79,77 @@ if (!$realm) {
         $bastionCommand =~ s{\s+--\s+$}{};
         $bastionCommand =~ s{ +}{ }g;
         osh_info colored("alias ${bastionName}m='mosh --ssh=\"$bastionCommand\" $cacheDestination -- '", "magenta");
-        $ret{'bastion_alias_command_mosh'} = "mosh --ssh=\"$bastionCommand\" $cacheDestination -- ";
+        $ret{'account'}{'bastion_alias_command_mosh'} = "mosh --ssh=\"$bastionCommand\" $cacheDestination -- ";
     }
 }
 
 osh_info "\nMulti-Factor Authentication (MFA) on your account:";
-$ret{'mfa_password_required'} =
-  OVH::Bastion::is_user_in_group(user => $self, group => OVH::Bastion::MFA_PASSWORD_REQUIRED_GROUP) ? 1 : 0;
-$ret{'mfa_password_bypass'} =
-  OVH::Bastion::is_user_in_group(user => $self, group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP) ? 1 : 0;
-$ret{'mfa_password_configured'} =
-  OVH::Bastion::is_user_in_group(user => $self, group => OVH::Bastion::MFA_PASSWORD_CONFIGURED_GROUP) ? 1 : 0;
+$ret{'mfa'}{'password'} = {
+    required => OVH::Bastion::is_user_in_group(
+        user => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_REQUIRED_GROUP)->toJsonBool(),
+    bypass => OVH::Bastion::is_user_in_group(
+        user => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP)->toJsonBool(),
+    configured => OVH::Bastion::is_user_in_group(
+        user => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_CONFIGURED_GROUP)->toJsonBool(),
+};
+
 osh_info "- Additional password authentication is "
-  . ($ret{'mfa_password_required'} ? colored('required', 'green') : colored('not required', 'blue'));
+  . ($ret{'mfa'}{'password'}{'required'} ? colored('required', 'green') : colored('not required', 'blue'));
 osh_info "- Additional password authentication bypass is "
-  . ($ret{'mfa_password_bypass'} ? colored('enabled', 'green') : colored('disabled', 'blue'));
+  . ($ret{'mfa'}{'password'}{'bypass'} ? colored('enabled', 'green') : colored('disabled', 'blue'));
 osh_info "- Additional password authentication is "
-  . ($ret{'mfa_password_configured'} ? colored('enabled and active', 'green') : colored('disabled', 'blue'));
+  . ($ret{'mfa'}{'password'}{'configured'} ? colored('enabled and active', 'green') : colored('disabled', 'blue'));
 
-$ret{'mfa_totp_required'} =
-  OVH::Bastion::is_user_in_group(user => $self, group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP) ? 1 : 0;
-$ret{'mfa_totp_bypass'} =
-  OVH::Bastion::is_user_in_group(user => $self, group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP) ? 1 : 0;
-$ret{'mfa_totp_configured'} =
-  OVH::Bastion::is_user_in_group(user => $self, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP) ? 1 : 0;
+$ret{'mfa'}{'totp'} = {
+  required => OVH::Bastion::is_user_in_group(
+        user => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP)->toJsonBool(),
+  bypass => OVH::Bastion::is_user_in_group(
+        user => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP)->toJsonBool(),
+  configured => OVH::Bastion::is_user_in_group(
+        user => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP)->toJsonBool(),
+};
+
 osh_info "- Additional TOTP authentication is "
-  . ($ret{'mfa_totp_required'} ? colored('required', 'green') : colored('not required', 'blue'));
+  . ($ret{'mfa'}{'totp'}{'required'} ? colored('required', 'green') : colored('not required', 'blue'));
 osh_info "- Additional TOTP authentication bypass is "
-  . ($ret{'mfa_totp_bypass'} ? colored('enabled', 'green') : colored('disabled', 'blue'));
+  . ($ret{'mfa'}{'totp'}{'bypass'} ? colored('enabled', 'green') : colored('disabled', 'blue'));
 osh_info "- Additional TOTP authentication is "
-  . ($ret{'mfa_totp_configured'} ? colored('enabled and active', 'green') : colored('disabled', 'blue'));
+  . ($ret{'mfa'}{'totp'}{'configured'} ? colored('enabled and active', 'green') : colored('disabled', 'blue'));
 
-$fnret = OVH::Bastion::sys_getpasswordinfo(user => $self);
+$fnret = OVH::Bastion::sys_getpasswordinfo(user => $Self->sysUser);
 if ($fnret) {
-    $ret{"password_$_"} = $fnret->value->{$_} for (keys %{$fnret->value});
+    $ret{'account'}{'password'}{$_} = $fnret->value->{$_} for (keys %{$fnret->value});
     osh_info "\nAccount PAM UNIX password information (used for password MFA):";
-    osh_info sprintf("- Password is %s",
-        $ret{'password_password'} eq 'locked'
+    osh_info("- Password is "
+        . $ret{'account'}{'password'}{'password'} eq 'locked'
         ? colored('unused', 'blue')
-        : ($ret{'password_password'} eq 'set' ? colored('set', 'green') : colored($ret{'password_password'}, 'red')));
-    osh_info "- Password was last changed on " . colored($ret{'password_date_changed'}, 'magenta');
-    if ($ret{'password_max_days'} == -1) {
+        : (
+            $ret{'account'}{'password'}{'password'} eq 'set'
+            ? colored('set', 'green')
+            : colored($ret{'account'}{'password'}{'password'}, 'red')
+        )
+    );
+
+    osh_info "- Password was last changed on " . colored($ret{'account'}{'password'}{'date_changed'}, 'magenta');
+    if ($ret{'account'}{'password'}{'max_days'} == -1) {
         osh_info "- Password will never expire";
     }
     else {
-        osh_info "- Password must be changed every " . colored($ret{'password_max_days'}, 'magenta') . " days at least";
+        osh_info "- Password must be changed every "
+          . colored($ret{'account'}{'password'}{'max_days'}, 'magenta')
+          . " days at least";
         osh_info "- A warning is displayed "
-          . colored($ret{'password_warn_days'}, 'magenta')
+          . colored($ret{'account'}{'password'}{'warn_days'}, 'magenta')
           . " days before expiration";
     }
-    if ($ret{'password_min_days'} != 0) {
-        osh_info "- The minimum time between two password changes is " . $ret{'password_min_days'} . " days";
+    if ($ret{'account'}{'password'}{'min_days'} != 0) {
+        osh_info "- The minimum time between two password changes is "
+          . $ret{'account'}{'password'}{'min_days'} . " days";
     }
-    if ($ret{'password_max_days'} != -1) {
-        if ($ret{'password_inactive_days'} != -1) {
+    if ($ret{'account'}{'password'}{'max_days'} != -1) {
+        if ($ret{'account'}{'password'}{'inactive_days'} != -1) {
             osh_info "- Account will be disabled "
-              . colored($ret{'password_inactive_days'}, 'magenta')
+              . colored($ret{'account'}{'password'}{'inactive_days'}, 'magenta')
               . " days after password expiration";
         }
         else {
@@ -133,10 +158,12 @@ if ($fnret) {
     }
 }
 
-osh_info
-  sprintf("\nI am %s, aka %s", colored(Sys::Hostname::hostname(), 'green'), colored($config->{'bastionName'}, 'green'));
-$ret{'hostname'}     = Sys::Hostname::hostname();
-$ret{'bastion_name'} = $config->{'bastionName'};
+osh_info(sprintf("\nI am %s, aka %s",
+    colored(Sys::Hostname::hostname(), 'green'),
+    colored($config->{'bastionName'}, 'green')
+));
+$ret{'bastion'}{'hostname'} = Sys::Hostname::hostname();
+$ret{'bastion'}{'name'}     = $config->{'bastionName'};
 
 $fnret = OVH::Bastion::get_account_list();
 my $nbaccounts = $fnret ? keys %{$fnret->value} : '?';
@@ -147,8 +174,8 @@ osh_info "I have "
   . " registered accounts and "
   . colored($nbgroups, 'green')
   . " groups";
-$ret{'registered_accounts'} = $nbaccounts;
-$ret{'registered_groups'}   = $nbgroups;
+$ret{'bastion'}{'registered_accounts'} = $nbaccounts;
+$ret{'bastion'}{'registered_groups'}   = $nbgroups;
 
 if ($config->{'readOnlySlaveMode'}) {
     osh_info "I am a " . colored("SLAVE", "cyan") . ", which means modifications must be made through my master";
@@ -156,50 +183,50 @@ if ($config->{'readOnlySlaveMode'}) {
 else {
     osh_info "I am a " . colored("MASTER", "cyan") . ", which means I accept modifications";
 }
-$ret{'slave_mode'} = $config->{'readOnlySlaveMode'};
+$ret{'configuration'}{'slave_mode'} = $config->{'readOnlySlaveMode'};
 
-if (OVH::Bastion::is_auditor(account => $self)) {
+if ($Self->isAuditor) {
     my @adminAccounts = @{$config->{'adminAccounts'}};
     osh_info "My admins are: " . colored(@adminAccounts ? join(", ", @adminAccounts) : "-", "magenta");
-    $ret{'adminAccounts'} = \@adminAccounts;
+    $ret{'configuration'}{'admins'} = \@adminAccounts;
 
     my @superOwnerAccounts = @{$config->{'superOwnerAccounts'}};
     osh_info "My super owners are: " . colored(@superOwnerAccounts ? join(", ", @superOwnerAccounts) : "-", "magenta");
-    $ret{'superOwnerAccounts'} = \@superOwnerAccounts;
+    $ret{'configuration'}{'superowners'} = \@superOwnerAccounts;
 }
 
 my @allowedNets = @{$config->{'allowedNetworks'}};
 osh_info "The networks I'm able to connect you to on the egress side are: "
   . colored(@allowedNets ? join(", ", @allowedNets) : "all", "magenta");
-$ret{'allowed_networks_list'} = \@allowedNets;
+$ret{'configuration'}{'allowed_networks_list'} = \@allowedNets;
 
 my @forbiddenNets = @{$config->{'forbiddenNetworks'}};
 osh_info "The networks that are explicitly forbidden on the egress side are: "
   . colored(@forbiddenNets ? join(", ", @forbiddenNets) : "none", "magenta");
-$ret{'forbidden_networks_list'} = \@forbiddenNets;
+$ret{'configuration'}{'forbidden_networks_list'} = \@forbiddenNets;
 
 $fnret = OVH::Bastion::get_bastion_ips();
 if ($fnret) {
     my @ips = grep { !/^127\./ } @{$fnret->value};
     if (@ips > 1) {
         osh_info "My egress connection IPs to remote servers are " . colored(join(", ", @ips), "magenta");
-        osh_info
-          "...this includes the IPs of my potential siblings, don't forget to whitelist those in your firewalls!";
+        osh_info "...this includes the IPs of my potential siblings, "
+          . "don't forget to whitelist those in your firewalls!";
     }
     else {
         osh_info "My egress connection IP to remote servers is " . colored(join(", ", @ips), "magenta");
         osh_info "...don't forget to whitelist me in your firewalls!";
     }
-    $ret{'egress_ip_list'} = \@ips;
+    $ret{'configuration'}{'egress_ip_list'} = \@ips;
 }
 
 osh_info "\nThe following policy applies on this bastion:";
 osh_info "- The interactive mode (-i) is "
   . ($config->{'interactiveModeAllowed'} ? colored('ENABLED', 'green') : colored('DISABLED', 'red'));
-$ret{'interactive_mode_allowed'} = $config->{'interactiveModeAllowed'};
+$ret{'configuration'}{'interactive_mode_allowed'} = $config->{'interactiveModeAllowed'} ? \1 : \0;
 osh_info "- The support of mosh is "
   . ($config->{'moshAllowed'} ? colored('ENABLED', 'green') : colored('DISABLED', 'red'));
-$ret{'mosh_allowed'} = $config->{'moshAllowed'};
+$ret{'configuration'}{'mosh_allowed'} = $config->{'moshAllowed'} ? \1 : \0;
 if ($config->{'accountMaxInactiveDays'}) {
     osh_info "- Account expiration is "
       . colored('ENABLED', 'green')
@@ -209,7 +236,7 @@ if ($config->{'accountMaxInactiveDays'}) {
 else {
     osh_info "- Account expiration is " . colored('DISABLED', 'red');
 }
-$ret{'account_expiration_days'} = $config->{'accountMaxInactiveDays'};
+$ret{'configuration'}{'account_expiration_days'} = $config->{'accountMaxInactiveDays'}+0;
 
 if ($config->{'idleLockTimeout'}) {
     osh_info "- Keyboard input idle time for session locking is "
@@ -221,7 +248,7 @@ if ($config->{'idleLockTimeout'}) {
 else {
     osh_info "- Keyboard input idle time for session locking is " . colored('DISABLED', 'red');
 }
-$ret{'idle_lock_timeout'} = $config->{'idleLockTimeout'};
+$ret{'configuration'}{'idle_lock_timeout'} = $config->{'idleLockTimeout'}+0;
 
 if ($config->{'idleKillTimeout'}) {
     osh_info "- Keyboard input idle time for session killing is "
@@ -233,7 +260,7 @@ if ($config->{'idleKillTimeout'}) {
 else {
     osh_info "- Keyboard input idle time for session killing is " . colored('DISABLED', 'red');
 }
-$ret{'idle_kill_timeout'} = $config->{'idleKillTimeout'};
+$ret{'configuration'}{'idle_kill_timeout'} = $config->{'idleKillTimeout'}+0;
 
 $fnret = OVH::Bastion::get_from_for_user_key();
 if ($fnret && $fnret->value->{'from'}) {
@@ -241,11 +268,11 @@ if ($fnret && $fnret->value->{'from'}) {
       . colored('ENABLED', 'green')
       . ", with the following value: "
       . colored($fnret->value->{'from'}, 'magenta');
-    $ret{'ingress_keys_from_ip_list'} = $fnret->value->{'ipList'};
+    $ret{'configuration'}{'ingress_keys_from_ip_list'} = $fnret->value->{'ipList'};
 }
 else {
     osh_info "- The forced \"from\" prepend on ingress keys is " . colored('DISABLED', 'red');
-    $ret{'ingress_keys_from_ip_list'} = [];
+    $ret{'configuration'}{'ingress_keys_from_ip_list'} = [];
 }
 
 foreach my $way (qw{ ingress egress }) {
@@ -253,14 +280,14 @@ foreach my $way (qw{ ingress egress }) {
     if ($fnret) {
         osh_info "- The following algorithms are allowed for $way SSH keys: "
           . colored(join(', ', @{$fnret->value}), 'magenta');
-        $ret{"${way}_ssh_key_algorithms"} = $fnret->value;
+        $ret{'configuration'}{$way}{'ssh_key_algorithms'} = $fnret->value;
     }
     if (grep { $_ eq 'rsa' } @{$fnret->value}) {
         osh_info "- The RSA key size for $way SSH keys must be between "
           . colored($config->{"minimum" . ucfirst($way) . "RsaKeySize"}, "magenta") . " and "
           . colored($config->{"maximum" . ucfirst($way) . "RsaKeySize"}, "magenta") . " bits";
-        $ret{"${way}_rsa_min_size"} = $config->{"minimum" . ucfirst($way) . "RsaKeySize"};
-        $ret{"${way}_rsa_max_size"} = $config->{"maximum" . ucfirst($way) . "RsaKeySize"};
+        $ret{'configuration'}{$way}{'rsa_min_size'} = $config->{"minimum" . ucfirst($way) . "RsaKeySize"}+0;
+        $ret{'configuration'}{$way}{'rsa_max_size'} = $config->{"maximum" . ucfirst($way) . "RsaKeySize"}+0;
     }
 }
 osh_info "- The Multi-Factor Authentication (MFA) policy is "
@@ -274,15 +301,15 @@ if ($Self->isAdmin) {
     $fnret = OVH::Bastion::sysinfo();
     if ($fnret and $fnret->value) {
         osh_info "We're running under " . $fnret->value->{'system'} . " " . $fnret->value->{'release'};
-        $ret{'os_system'}  = $fnret->value->{'system'};
-        $ret{'os_release'} = $fnret->value->{'release'};
+        $ret{'system'}{'os'}  = $fnret->value->{'system'};
+        $ret{'system'}{'release'} = $fnret->value->{'release'};
     }
 
     $fnret = OVH::Bastion::execute(cmd => ['uptime']);
     if ($fnret) {
         $fnret->value->{'stdout'}->[0] =~ s/^\s+//;
         osh_info $fnret->value->{'stdout'}->[0];
-        $ret{'uptime'} = $fnret->value->{'stdout'}->[0];
+        $ret{'system'}{'uptime'} = $fnret->value->{'stdout'}->[0];
     }
 
     $fnret = OVH::Bastion::execute(cmd => ['free', '-h']);

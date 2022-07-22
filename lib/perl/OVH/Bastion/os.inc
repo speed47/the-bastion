@@ -642,7 +642,7 @@ sub sys_getpw_all {
                 quota   => $line[4],
                 comment => $line[5],
                 gcos    => $line[6],
-                dir     => $line[7],
+                home    => $line[7],
                 shell   => $line[8],
                 expire  => $line[9],
             };
@@ -704,7 +704,7 @@ sub sys_getpw_name {
             quota   => $fields[4],
             comment => $fields[5],
             gcos    => $fields[6],
-            dir     => $fields[7],
+            home    => $fields[7],
             shell   => $fields[8],
             expire  => $fields[9],
         };

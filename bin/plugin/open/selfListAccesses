@@ -42,14 +42,14 @@ EOF
 
 my $fnret;
 
-$fnret = OVH::Bastion::get_acls(account => $self);
+$fnret = OVH::Bastion::get_acls(account => $Self->name);
 $fnret or osh_exit $fnret;
 
 if (not @{$fnret->value}) {
-    osh_ok R('OK_EMPTY', msg => "Dear $self, you have no registered accesses to machines through this bastion yet");
+    osh_ok R('OK_EMPTY', msg => "Dear $Self, you have no registered accesses to machines through this bastion yet");
 }
 
-osh_info "Dear $self, you have access to the following servers:\n";
+osh_info "Dear $Self, you have access to the following servers:\n";
 
 OVH::Bastion::print_acls(
     acls       => $fnret->value,

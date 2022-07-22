@@ -49,7 +49,7 @@ my $fnret;
 
 $fnret = OVH::Bastion::Plugin::generateEgressKey::preconditions(
     context => 'account',
-    account => $self,
+    account => $Self->name,
     algo    => $algo,
     size    => $size
 );
@@ -70,9 +70,9 @@ if ($encrypted) {
 
 osh_info "Generating your key, this might take a while...";
 $fnret = OVH::Bastion::generate_ssh_key(
-    folder     => OVH::Bastion::get_home_from_env()->value . '/.ssh',
+    folder     => $Self->home . '/.ssh',
     prefix     => 'private',
-    name       => $self,
+    name       => $Self->name,
     algo       => $algo,
     size       => $size,
     passphrase => $passphrase,

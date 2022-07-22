@@ -82,7 +82,7 @@ testsuite_selfaccesses()
     script batch_one "printf \"%b\\n\" \"info\\naccountInfo --account $account0\\nselfListEgressKeys\" | $a1 --osh batch"
     retvalshouldbe 0
     json .command batch .error_code OK
-    json '.value[0].result.error_code' OK '.value[0].command' info '.value[0].result.value.account' "$account1"
+    json '.value[0].result.error_code' OK '.value[0].command' info '.value[0].result.value.account.name' "$account1"
     json '.value[1].result.error_code' KO_RESTRICTED_COMMAND '.value[1].command' "accountInfo --account $account0"
     json '.value[2].result.error_code' OK '.value[2].command' selfListEgressKeys
 

@@ -31,7 +31,7 @@ my $fnret;
 my @command;
 
 @command = qw{ pkill -c --uid };
-push @command, $self;
+push @command, $Self->sysUser;
 push @command, qw{ -USR2 ttyrec };
 
 osh_info "Unlocking all your sessions...";

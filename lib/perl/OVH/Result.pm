@@ -60,21 +60,26 @@ sub R {
 
 sub err   { return shift->{'err'} }
 sub value { return shift->{'value'} }
-sub msg   { return $_[0]->{'msg'} ? $_[0]->{'msg'} : $_[0]->{'err'} }    ## no critic (ArgUnpacking)
+sub msg   { my $this = shift; return $this->{'msg'} ? $this->{'msg'} : $this->{'err'} }
 
 sub is_err { return shift->{'err'} =~ /^ERR/ }
 sub is_ok  { return shift->{'err'} =~ /^OK/ }
 sub is_ko  { return shift->{'err'} =~ /^KO/ }
 
 sub TO_JSON {
-    my $self = shift;
+    my $this = shift;
     return {
-        error_code    => $self->err,
-        value         => $self->value,
-        error_message => $self->msg,
+        error_code    => $this->err,
+        value         => $this->value,
+        error_message => $this->msg,
       }
-      if (ref $self eq 'OVH::Result');
+      if (ref $this eq 'OVH::Result');
     return {};
+}
+
+sub toJsonBool {
+    my $this = shift;
+    return $this ? \1 : \0;
 }
 
 1;

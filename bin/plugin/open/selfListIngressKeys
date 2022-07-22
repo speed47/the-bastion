@@ -24,7 +24,7 @@ EOF
 
 my $fnret;
 
-$fnret = OVH::Bastion::get_authorized_keys_from_file(file => $HOME . '/' . OVH::Bastion::AK_FILE, includeInvalid => 1);
+$fnret = OVH::Bastion::get_authorized_keys_from_file(file => $Self->home . '/' . OVH::Bastion::AK_FILE, includeInvalid => 1);
 $fnret or osh_exit $fnret;
 
 my @result;
@@ -39,4 +39,4 @@ if (!@result) {
     osh_info "No ingress keys configured for your account!";
 }
 
-osh_ok({keys => \@result, account => $self});
+osh_ok({keys => \@result, account => $Self->name});

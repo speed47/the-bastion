@@ -70,7 +70,7 @@ elsif ($TOTPProvider eq 'google-authenticator') {
         '-c',
         "google-authenticator -f -t -Q UTF8 -r 3 -R 15 -w 2 -D "
           . join(" ", @additional_params)
-          . " -l $self -s $HOME/"
+          . " -l ".$Self->name." -s ".$Self->home."/"
           . OVH::Bastion::TOTP_GAUTH_FILENAME,
         '/dev/null'
     );
@@ -90,7 +90,7 @@ elsif ($TOTPProvider eq 'google-authenticator') {
         osh_exit('ERR_TOTP_SETUP_FAILED', msg => "Couldn't setup TOTP for your account, try again!");
     }
 
-    chmod 0400, $HOME . '/' . OVH::Bastion::TOTP_GAUTH_FILENAME;
+    chmod 0400, $Self->home . '/' . OVH::Bastion::TOTP_GAUTH_FILENAME;
 }
 elsif ($TOTPProvider eq 'duo') {
 
@@ -109,6 +109,6 @@ else {
 # it worked, add the account to the proper system group
 @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-selfMFASetupTOTP';
-push @command, '--account', $self;
+push @command, '--account', $Self->name;
 
 osh_exit(OVH::Bastion::helper(cmd => \@command));

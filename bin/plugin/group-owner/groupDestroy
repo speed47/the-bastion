@@ -50,7 +50,7 @@ $fnret or osh_exit($fnret);
 $group = $fnret->value->{'group'};
 my $shortGroup = $fnret->value->{'shortGroup'};
 
-$fnret = OVH::Bastion::is_group_owner(group => $shortGroup, account => $self, superowner => 1);
+$fnret = OVH::Bastion::is_group_owner(group => $shortGroup, account => $Self->name, superowner => 1);
 if (!$fnret) {
     osh_exit 'ERR_NOT_GROUP_OWNER',
       "Sorry, you're not an owner of group $shortGroup, which is needed to being able to delete it";

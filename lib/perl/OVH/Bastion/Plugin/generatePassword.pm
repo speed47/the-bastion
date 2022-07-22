@@ -10,7 +10,7 @@ use OVH::Bastion;
 
 sub preconditions {
     my %params  = @_;
-    my $self    = $params{'self'};
+    my $Self    = $params{'Self'};
     my $sudo    = $params{'sudo'};
     my $group   = $params{'group'};
     my $account = $params{'account'};
@@ -57,7 +57,7 @@ sub preconditions {
     return R('ERR_INVALID_PARAMETER', msg => "Specified size must be >= 8")            if $size < 8;
     return R('ERR_INVALID_PARAMETER', msg => "Specified size must be <= 127")          if $size > 128;
 
-    if ($context eq 'account' && $self ne $account) {
+    if ($context eq 'account' && $Self ne $Account) {
         $fnret = OVH::Bastion::is_user_in_group(user => $self, group => "osh-accountGeneratePassword");
         $fnret or return R('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $self");
     }
@@ -70,13 +70,12 @@ sub preconditions {
     return R(
         'OK',
         value => {
-            self       => $self,
-            account    => $account,
+            Self       => $Self,
+            Account    => $Account,
             shortGroup => $shortGroup,
             group      => $group,
             size       => $size,
             context    => $context,
-            passhome   => $passhome,
             base       => $base
         }
     );
@@ -88,8 +87,8 @@ sub act {
     $fnret or return $fnret;
 
     my %values = %{$fnret->value()};
-    my ($self, $account, $shortGroup, $group, $size, $passhome, $base, $context, $passhome, $base) =
-      @values{qw{ self account shortGroup group size passhome base context passhome base }};
+    my ($Self, $Account, $shortGroup, $group, $size, $passhome, $base, $context, $passhome, $base) =
+      @values{qw{ Self Account shortGroup group size passhome base context passhome base }};
 
     my $pass;
     my $antiloop = 1000;
@@ -177,7 +176,7 @@ sub act {
     }
 
     if (open(my $fdout, '>', "$base.metadata")) {
-        print $fdout "CREATED_BY=$self\nBASTION_VERSION=" . $OVH::Bastion::VERSION . "\nCREATION_TIME=" . localtime() . "\nCREATION_TIMESTAMP=" . time() . "\n";
+        print $fdout "CREATED_BY=$Self\nBASTION_VERSION=" . $OVH::Bastion::VERSION . "\nCREATION_TIME=" . localtime() . "\nCREATION_TIMESTAMP=" . time() . "\n";
         close($fdout);
         if ($context eq 'account') {
             if (my (undef, undef, $uid, $gid) = getpwnam($account)) {

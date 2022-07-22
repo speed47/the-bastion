@@ -49,7 +49,7 @@ $fnret = $AccountSudoAs->canExecutePlugin($sudoCmd);
 $fnret or osh_exit($fnret);
 
 my @cmd = qw( sudo -n -u );
-push @cmd, $AccountSudoAs->sysName;
+push @cmd, $AccountSudoAs->sysUser;
 push @cmd, qw( -- /usr/bin/env perl );
 push @cmd, $OVH::Bastion::BASEPATH . '/bin/shell/osh.pl';
 push @cmd, '-c';

@@ -33,7 +33,7 @@ if (not $id) {
     osh_exit R('ERR_MISSING_PARAMETER', msg => "Missing mandatory parameter ID");
 }
 
-$fnret = OVH::Bastion::log_access_get(account => $self, uniqid => $id);
+$fnret = OVH::Bastion::log_access_get(account => $Self->name, uniqid => $id);
 $fnret or osh_exit $fnret;
 
 my $hashkey = (keys %{$fnret->value})[0];
