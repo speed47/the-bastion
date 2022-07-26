@@ -52,7 +52,10 @@ $fnret or osh_exit $fnret;
 $group = $fnret->value->{'group'};
 my $shortGroup = $fnret->value->{'shortGroup'};
 
-$fnret = OVH::Bastion::get_acl_way(way => 'groupguest', group => $shortGroup, account => $account);
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or osh_exit $Account;
+
+$fnret = OVH::Bastion::get_acl_way(way => 'groupguest', group => $shortGroup, account => $Account->name);
 $fnret or osh_exit $fnret;
 
 if (not @{$fnret->value}) {

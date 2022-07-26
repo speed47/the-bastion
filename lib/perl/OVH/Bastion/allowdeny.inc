@@ -6,29 +6,6 @@ use common::sense;
 
 use Socket qw{ :all };
 
-sub get_personal_account_keys {
-    my %params   = @_;
-    my $account  = $params{'account'};
-    my $listOnly = $params{'listOnly'} ? 1 : 0;
-    my $forceKey = $params{'forceKey'};
-    my $fnret;
-
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(
-        account     => $account,
-        accountType => ($account =~ /^realm_/ ? "realm" : "normal")
-    );
-    $fnret or return $fnret;
-    $account = $fnret->value->{'account'};    # untainted version
-
-    return _get_pub_keys_from_directory(
-        dir     => "/home/$account/.ssh",
-        pattern => qr/^private\.pub$|^id_[a-z0-9]+[_.]private\.\d+\.pub$/,
-        listOnly    => $listOnly,             # don't be slow and don't parse the keys (by calling ssh-keygen -lf)
-        forceKey    => $forceKey,
-        wantPrivate => 1,
-    );
-}
-
 my %_cache_get_group_keys;
 
 sub get_group_keys {
@@ -51,7 +28,7 @@ sub get_group_keys {
     my $shortGroup = $fnret->value->{'shortGroup'};
     my $keyhome    = $fnret->value->{'keyhome'};
 
-    $fnret = _get_pub_keys_from_directory(
+    $fnret = get_pub_keys_from_directory(
         dir         => $keyhome,
         pattern     => qr/^id_([a-z0-9]+)_\Q$shortGroup\E/,
         listOnly    => $listOnly,
@@ -352,58 +329,7 @@ sub ip2host {
     return R('OK', value => $host);
 }
 
-# returns a list of the bastion groups (more precisely, the system group names
-# mapped to these groups) a user is member of.
-sub get_user_groups {
-    my %params = @_;
-    my $user   = $params{'user'} || $params{'account'};
-    my $extra  = $params{'extra'};                        # Do we want to include gatekeeper/aclkeeper/owner groups ?
-    my $cache  = $params{'cache'};                        # allow cache use of sys_getgr_all(), and also our own
-                                                          # cache if we've already been called with same params before
-    state %cached_response;
-
-    if (not $user) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'account'");
-    }
-
-    my $cachekey = sprintf("user=%s,extra=%d", $user, $extra ? 1 : 0);
-    if ($cache && defined $cached_response{$cachekey}) {
-        return $cached_response{$cachekey};
-    }
-
-    # we loop through all the system groups to find the ones having user
-    # as a member
-    my $fnret = OVH::Bastion::sys_getgr_all(cache => $cache);
-    $fnret or return $fnret;
-
-    my @groups;
-    foreach my $name (keys %{$fnret->value}) {
-        my $entry = $fnret->value->{$name};
-        if (grep { $user eq $_ } @{$entry->{'members'} || []}) {
-            push @groups, $name;
-        }
-    }
-
-    my @availableGroups;
-    foreach my $group (@groups) {
-        if ($group =~ /^key.+-(gatekeeper|aclkeeper|owner)$/) {
-            push @availableGroups, $group if $extra;
-        }
-        else {
-            push @availableGroups, $group if $group =~ /^key/;
-        }
-    }
-
-    if (scalar(@availableGroups)) {
-        $cached_response{$cachekey} = R('OK', value => \@availableGroups);
-    }
-    else {
-        $cached_response{$cachekey} = R('ERR_NO_GROUP', msg => 'Unable to find any group');
-    }
-    return $cached_response{$cachekey};
-}
-
-sub _get_pub_keys_from_directory {
+sub get_pub_keys_from_directory {
     my %params      = @_;
     my $dir         = $params{'dir'};
     my $pattern     = $params{'pattern'};
@@ -780,11 +706,8 @@ sub is_access_granted {
         }
     }
 
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-    $fnret or return $fnret;
-
-    $account = $fnret->value->{'account'};
-    my $sysaccount = $fnret->value->{'sysaccount'};
+    my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+    $Account or return $Account;
 
     # 1/3 check for personal accesses
     # ... normal way
@@ -798,13 +721,14 @@ sub is_access_granted {
     push @grants, {type => 'personal-legacy', %{$grantedLegacy->value}} if $grantedLegacy;
 
     # 2/3 check groups
-    $fnret = OVH::Bastion::get_user_groups(account => $sysaccount);
-    osh_debug("is_access_granted: get_user_groups of $sysaccount says "
+    $fnret = $Account->getGroups();
+    my $groups = $fnret->value || {};
+    osh_debug("is_access_granted: get_user_groups of $Account says "
           . $fnret->msg
           . " with grouplist "
-          . Data::Dumper::Dumper($fnret->value));
+          . Data::Dumper::Dumper($groups));
 
-    foreach my $group (@{$fnret->value || []}) {
+    foreach my $group (sort keys %$groups) {
 
         # sanitize the group name
         $fnret = OVH::Bastion::is_valid_group(group => $group, groupType => "key");
@@ -818,13 +742,13 @@ sub is_access_granted {
         next if not $grantedGroup;            # if group doesn't have access, don't even check legacy either
 
         # now we have to cases, if the group has access: either the account is member or guest
-        if (OVH::Bastion::is_group_member(group => $shortGroup, account => $account, sudo => $params{'sudo'})) {
+        if ($groups->{$shortGroup}{'member'}) {
 
             # normal member case, just reuse $grantedGroup
             osh_debug("is_access_granted: adding grantedGroup to grants because is member");
             push @grants, {type => 'group-member', group => $shortGroup, %{$grantedGroup->value}};
         }
-        elsif (OVH::Bastion::is_group_guest(group => $shortGroup, account => $account, sudo => $params{'sudo'})) {
+        elsif ($groups->{$shortGroup}{'guest'}) {
 
             # normal guest case
             my $grantedGuest =
@@ -845,8 +769,8 @@ sub is_access_granted {
             }
         }
         else {
-            # should not happen
-            warn_syslog("is_access_granted: $account is in group $shortGroup but is neither member or guest !!?");
+            # has another role (aclkeeper, gatekeeper, owner) => no access through this group
+            osh_debug("is_access_granted: $account has a role in group $shortGroup but is neither member or guest");
         }
     }
 
@@ -868,14 +792,8 @@ sub is_access_granted {
                     group => $access->{'group'});
             }
             elsif ($access->{'type'} =~ /^personal/) {
-                $data{'keys'} = OVH::Bastion::get_personal_account_keys(
-                    account  => $sysaccount,
-                    listOnly => $listOnly,
-                    noexec   => $noexec,
-                    forceKey => $access->{'forceKey'}
-                );
-                $data{'mfa'} =
-                  OVH::Bastion::account_config(key => "personal_egress_mfa_required", account => $sysaccount);
+                $data{'keys'} = $Account->getPersonalKeys(listOnly => $listOnly, noexec => $noexec, forceKey => $access->{'forceKey'});
+                $data{'mfa'} = $Account->getConfig("private/personal_egress_mfa_required");
             }
             else {
                 # unknown access type? no key!
@@ -935,6 +853,7 @@ sub ssh_test_access_way {
     $fnret or return $fnret;
     $user = $fnret->value;
 
+    my $Account;
     if ($group) {
         $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
         $fnret or return $fnret;
@@ -944,11 +863,10 @@ sub ssh_test_access_way {
         $fnret = OVH::Bastion::get_group_keys(group => $shortGroup);
     }
     elsif ($account) {
-        $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-        $fnret or return $fnret;
-        $account = $fnret->value->{'account'};
+        $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+        $Account or return $Account;
 
-        $fnret = OVH::Bastion::get_personal_account_keys(account => $account);
+        $fnret = $Account->getPersonalKeys();
     }
     else {
         return R('ERR_MISSING_PARAMETER', msg => "Missing 'group' or 'account' for ssh_test_access_way");
@@ -1038,33 +956,33 @@ sub get_acls {
     my $fnret;
     require Data::Dumper;
 
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-    $fnret or return $fnret;
-
-    $account = $fnret->value->{'account'};
-    my $sysaccount = $fnret->value->{'sysaccount'};
+    my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+    $Account or return $Account;
 
     # 1/3 check for personal accesses
     # ... normal way
-    my $grantedPersonal = OVH::Bastion::get_acl_way(way => 'personal', account => $account);
+    my $grantedPersonal = OVH::Bastion::get_acl_way(way => 'personal', account => $Account->name);
     osh_debug("get_acls: grantedPersonal=" . Data::Dumper::Dumper($grantedPersonal));
     push @acls, {type => 'personal', acl => $grantedPersonal->value}
       if ($grantedPersonal && @{$grantedPersonal->value});
 
     # ... legacy way
-    my $grantedLegacy = OVH::Bastion::get_acl_way(way => 'legacy', account => $account);
+    my $grantedLegacy = OVH::Bastion::get_acl_way(way => 'legacy', account => $Account->name);
     osh_debug("get_acls: grantedLegacy=" . Data::Dumper::Dumper($grantedLegacy));
     push @acls, {type => 'personal-legacy', acl => $grantedLegacy->value}
       if ($grantedLegacy && @{$grantedLegacy->value});
 
     # 2/3 check groups
-    $fnret = OVH::Bastion::get_user_groups(account => $sysaccount);
-    osh_debug("get_acls: get_user_groups of $sysaccount says "
+    $fnret = $Account->getGroups();
+    $fnret or return $fnret;
+
+    my %groups = %{ $fnret->value || {} };
+    osh_debug("get_acls: get_user_groups of $Account says "
           . $fnret->msg
           . " with grouplist "
           . Data::Dumper::Dumper($fnret->value));
 
-    foreach my $group (@{$fnret->value || []}) {
+    foreach my $group (keys %{$fnret->value || {}}) {
 
         # sanitize the group name
         $fnret = OVH::Bastion::is_valid_group(group => $group, groupType => "key");
@@ -1078,18 +996,18 @@ sub get_acls {
         next if not $grantedGroup;            # if group doesn't have access, don't even check legacy either
 
         # now we have to cases, if the group has access: either the account is member or guest
-        if (OVH::Bastion::is_group_member(group => $shortGroup, account => $account)) {
+        if ($groups{$shortGroup}{'member'}) {
 
             # normal member case, just reuse $grantedGroup
             osh_debug("get_acls: adding grantedGroup to grants because is member");
             push @acls, {type => 'group-member', group => $shortGroup, acl => $grantedGroup->value}
               if ($grantedGroup && @{$grantedGroup->value});
         }
-        elsif (OVH::Bastion::is_group_guest(group => $shortGroup, account => $account)) {
+        elsif ($groups{$shortGroup}{'guest'}) {
 
             # normal guest case
             my $grantedGuest =
-              OVH::Bastion::get_acl_way(way => "groupguest", group => $shortGroup, account => $account);
+              OVH::Bastion::get_acl_way(way => "groupguest", group => $shortGroup, account => $Account->name);
             osh_debug("get_acls: grantedGuest=" . Data::Dumper::Dumper($grantedGuest));
 
             # the guy must have a guest access but the group itself must also still have access
@@ -1108,7 +1026,7 @@ sub get_acls {
         }
         else {
             # should not happen
-            osh_debug("get_acls: $account is in group $shortGroup but is neither member or guest !!?");
+            osh_debug("get_acls: $Account is in group $shortGroup but is neither member or guest !!?");
         }
     }
     return R('OK', value => \@acls);
@@ -1127,19 +1045,16 @@ sub get_acl_way {
     my $account = delete $params{'account'};    # only meaningful and needed if type=personal or type=groupguest
 
     my $fnret;
-    my ($sysaccount, $remoteaccount);
+    my $Account;
     my $key    = $way;
     my $prefix = 'allowed';
 
     return R('ERR_MISSING_PARAMETER', msg => "Missing argument 'way'") if not defined $way;
 
     if ($account) {
-        $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-        $fnret or return $fnret;
-        $account       = $fnret->value->{'account'};
-        $sysaccount    = $fnret->value->{'sysaccount'};
-        $remoteaccount = $fnret->value->{'remoteaccount'};
-        $prefix        = "allowed_$remoteaccount" if $remoteaccount;
+        $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+        $Account or return $Account;
+        $prefix = "allowed_".$Account->remoteName if $Account->remoteName;
         $key .= ":$account";
     }
 
@@ -1147,6 +1062,7 @@ sub get_acl_way {
     if ($group) {
         $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => 'key');
         $fnret or return $fnret;
+
         $group      = $fnret->value->{'group'};        # untainted version
         $shortGroup = $fnret->value->{'shortGroup'};
         $key .= ":$group";
@@ -1160,28 +1076,28 @@ sub get_acl_way {
             return _get_acl_from_file(
                 mock_data => OVH::Bastion::mock_get_account_personal_accesses(account => $account));
         }
-        if (!(-f -r "/home/allowkeeper/$sysaccount/$prefix.private")) {
+        if (!(-f -r $Account->allowedPrivateFile)) {
             return R('ERR_PERMISSION_DENIED',
                 msg => "Couldn't open permission file with your current rights or it doesn't exist");
         }
-        $_cache_get_acl_way{$key} = _get_acl_from_file(file => "/home/allowkeeper/$sysaccount/$prefix.private");
+        $_cache_get_acl_way{$key} = _get_acl_from_file(file => $Account->allowedPrivateFile);
     }
     elsif ($way eq 'legacy') {
         return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'account' for $way way") if not $account;
         if (OVH::Bastion::is_mocking()) {
             return _get_acl_from_file(mock_data => OVH::Bastion::mock_get_account_legacy_accesses(account => $account));
         }
-        if (-f "/home/allowkeeper/$sysaccount/$prefix.private" && !-e "/home/allowkeeper/$sysaccount/$prefix.ip") {
+        if (-f $Account->allowedPrivateFile && !-e $Account->allowedIpFile) {
 
             # legacy file doesn't exist: no legacy rights
             $_cache_get_acl_way{$key} = R('OK_EMPTY', value => []);
         }
-        elsif (!(-f -r "/home/allowkeeper/$sysaccount/$prefix.ip")) {
+        elsif (!(-f -r $Account->allowedIpFile)) {
             return R('ERR_PERMISSION_DENIED',
                 msg => "Couldn't open permission file with your current rights or it doesn't exist");
         }
         else {
-            $_cache_get_acl_way{$key} = _get_acl_from_file(file => "/home/allowkeeper/$sysaccount/$prefix.ip");
+            $_cache_get_acl_way{$key} = _get_acl_from_file(file => $Account->allowedIpFile);
         }
     }
     elsif ($way eq 'group') {
@@ -1202,20 +1118,20 @@ sub get_acl_way {
             return _get_acl_from_file(
                 mock_data => OVH::Bastion::mock_get_account_guest_accesses(group => $group, account => $account));
         }
-        if (-f "/home/allowkeeper/$sysaccount/$prefix.private"
-            && !-e "/home/allowkeeper/$sysaccount/$prefix.partial.$shortGroup")
+        if (-f $Account->allowedPrivateFile
+            && !-e "/home/allowkeeper/".$Account->sysUser."/$prefix.partial.$shortGroup")
         {
 
             # guest file doesn't exist: no guest rights
             $_cache_get_acl_way{$key} = R('OK_EMPTY', value => []);
         }
-        elsif (!(-f -r "/home/allowkeeper/$sysaccount/$prefix.partial.$shortGroup")) {
+        elsif (!(-f -r "/home/allowkeeper/".$Account->sysUser."/$prefix.partial.$shortGroup")) {
             return R('ERR_PERMISSION_DENIED',
                 msg => "Couldn't open permission file with your current rights or it doesn't exist");
         }
         else {
             $_cache_get_acl_way{$key} =
-              _get_acl_from_file(file => "/home/allowkeeper/$sysaccount/$prefix.partial.$shortGroup");
+              _get_acl_from_file(file => "/home/allowkeeper/".$Account->sysUser."/$prefix.partial.$shortGroup");
         }
     }
 

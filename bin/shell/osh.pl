@@ -136,7 +136,7 @@ if (-e '/home/allowkeeper/maintenance') {
         close($fh);
     }
     osh_warn "The maintenance reason is as follows: $maintenance_message";
-    if (OVH::Bastion::is_admin()) {
+    if ($Self->isAdmin) {
         osh_warn "You are a bastion admin, allowing anyway, but it's really because it's you.";
     }
     else {
@@ -212,7 +212,7 @@ if (not $result) {
 $osh_debug = 1 if $opt_debug;    # osh_debug was already 1 if specified in config file
 
 # per-user debug ?
-$fnret = OVH::Bastion::account_config(account => $Self->name, key => "debug");
+$fnret = $Self->getConfig("private/debug");
 if ($fnret and $fnret->value() =~ /yes/) {
     $osh_debug = 1;
 }
@@ -672,7 +672,7 @@ my $remoteMfaPassword  = 0;
 my $remoteMfaTOTP      = 0;
 my $remoteHasPIV       = 0;
 
-my $pivEffectivePolicyEnabled = OVH::Bastion::is_effective_piv_account_policy_enabled(account => $Self->name);
+my $pivEffectivePolicyEnabled = $Self->isPivPolicyEffectivelyEnabled();
 
 # if we're coming from a realm, we're receiving a connection from another bastion, keep all the traces:
 my @previous_bastion_details;
@@ -754,7 +754,7 @@ my $hostto = OVH::Bastion::ip2host($host)->value || $host;
 
 # Special case: adminSudo for ssh connection as another user
 if ($sshAs) {
-    $fnret = OVH::Bastion::is_admin(account => $Self->name);
+    $fnret = $Self->isAdmin;
     my $logret = OVH::Bastion::log_access_insert(
         account     => $Self->name,
         cmdtype     => 'sshas',
@@ -782,12 +782,11 @@ if ($sshAs) {
         main_exit OVH::Bastion::EXIT_CONFLICTING_OPTIONS, "conflicting_options",
           "Can't use --ssh-as and --osh together. If you want to run a plugin as another user, use --osh adminSudo";
     }
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $sshAs);
-    $fnret
-      or main_exit OVH::Bastion::EXIT_ACCESS_DENIED, 'invalid_account', "Sorry, the specified account is invalid";
+    my $AccountSshAs = OVH::Bastion::Account->newFromName($sshAs, check => 1);
+    main_exit(OVH::Bastion::EXIT_ACCESS_DENIED, 'invalid_account', "Sorry, the specified account is invalid") if !$AccountSshAs;
 
     my @cmd = qw( sudo -n -u );
-    push @cmd, $sshAs;
+    push @cmd, $AccountSshAs->sysUser;
     push @cmd, qw( -- /usr/bin/env perl );
     push @cmd, $OVH::Bastion::BASEPATH . '/bin/shell/osh.pl';
     push @cmd, '-c';
@@ -810,17 +809,16 @@ if ($sshAs) {
         fields    => [
             ['type', 'admin-ssh-as'],
             ['account' => $Self->name],
-            ['sudo-as', $sshAs],
+            ['sudo-as', $AccountSshAs->name],
             ['plugin',  'ssh'],
             ['params', join(" ", @forwardOptions)]
         ]
     );
 
-    osh_warn("ADMIN SUDO: " . $Self->name . ", you'll now impersonate $sshAs, this has been logged.");
+    osh_warn("ADMIN SUDO: $Self, you'll now impersonate $AccountSshAs, this has been logged.");
 
-    exec(@cmd)
-      or main_exit(OVH::Bastion::EXIT_EXEC_FAILED,
-        "ssh_as_failed", "Couldn't start a session under the account $sshAs ($!)");
+    exec(@cmd) or main_exit(OVH::Bastion::EXIT_EXEC_FAILED,
+        "ssh_as_failed", "Couldn't start a session under the account $AccountSshAs ($!)");
 }
 
 # This will be filled with details we might want to pass on to the remote machine as a json-encoded envvar
@@ -1079,7 +1077,7 @@ if (!$quiet) {
 }
 
 # before doing stuff, check if we have the right to connect somewhere (some users are locked only to osh commands)
-$fnret = OVH::Bastion::account_config(account => $Self->name, key => OVH::Bastion::OPT_ACCOUNT_OSH_ONLY);
+$fnret = $Self->getConfig("private/osh_only");
 if ($fnret and $fnret->value() =~ /yes/) {
     $fnret = R('KO_ACCESS_DENIED', msg => "You don't have the right to connect anywhere");
 }
@@ -1143,6 +1141,7 @@ my $ttyrec_fnret = OVH::Bastion::build_ttyrec_cmdline_part1of2(
     port          => $port,
     user          => $user,
     account       => $Self->name,
+    Account       => $Self,
     uniqid        => $log_uniq_id,
     home          => $Self->home,
     realm         => $Self->realm,
@@ -1394,11 +1393,7 @@ else {
     push @command, '-o', "ConnectTimeout=$timeout" if $timeout;
 
     if (not $quiet) {
-        $fnret = OVH::Bastion::account_config(
-            account => $Self->name,
-            key     => OVH::Bastion::OPT_ACCOUNT_IDLE_IGNORE,
-            public  => 1
-        );
+        $fnret = $Self->getConfig("public/idle_ignore");
         if ($fnret && $fnret->value =~ /yes/) {
             osh_debug("Account is immune to idle");
         }
@@ -1743,7 +1738,7 @@ Usage (osh cmd): $bastionName --osh [OSH_COMMAND] [OSH_OPTIONS]
     use: $bastionName --osh OSH_COMMAND --help
 
 EOF
-    if (OVH::Bastion::is_admin(account => $Self->name)) {
+    if ($Self->isAdmin) {
         print STDERR <<"EOF" ;
 [ADMIN_OPTIONS]
     --ssh-as ACCOUNT    Impersonate another account to ssh connect somewhere on his or her behalf. This is logged.

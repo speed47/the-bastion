@@ -76,7 +76,7 @@ if (   OVH::Bastion::is_group_owner(group => $shortGroup, account => $Self->name
     || OVH::Bastion::is_group_gatekeeper(group => $shortGroup, account => $Self->name)
     || OVH::Bastion::is_group_aclkeeper(group => $shortGroup, account => $Self->name)
     || OVH::Bastion::is_group_member(group => $shortGroup, account => $Self->name)
-    || OVH::Bastion::is_auditor(account => $Self->name))
+    || $Self->isAuditor)
 {
 
     osh_info "Group "
@@ -94,6 +94,7 @@ if (   OVH::Bastion::is_group_owner(group => $shortGroup, account => $Self->name
             if (!$fnret || !@{$fnret->value}) {
 
                 # we couldn't get the list, or the list is empty: at least show that the realm shared account is there
+                warn_syslog("Couldn't get the remote accounts for realm $pRealm: ".$fnret->msg);
                 push @members, $user;
             }
             else {
@@ -138,12 +139,6 @@ if (   OVH::Bastion::is_group_owner(group => $shortGroup, account => $Self->name
       . $shortGroup
       . "'s Guests (with access to SOME of the group servers) are: "
       . colored(@filtered_guests ? join(" ", @guest_text) : '-', "red");
-
-    # deprecated in v2.18.00+
-    $result_hash->{'full_members'}    = \@members;
-    $result_hash->{'partial_members'} = \@filtered_guests;
-
-    # /deprecated
 
     $result_hash->{'members'}         = \@members;
     $result_hash->{'guests'}          = \@filtered_guests;

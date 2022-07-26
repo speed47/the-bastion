@@ -129,7 +129,12 @@ if (!$noKey) {
 #
 # Now create it
 #
-my @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
+my @command;
+# if we're already root (for example due to the install script calling us), don't use sudo
+if (!$Self->isLocalRoot) {
+    push @command, qw{ sudo -n -u root -- };
+}
+push @command, qw{ /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountCreate';
 push @command, "--type", "normal";
 push @command, "--account", $account;

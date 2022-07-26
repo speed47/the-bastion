@@ -101,9 +101,9 @@ foreach my $test ($group, "$group-gatekeeper", "$group-owner") {
     $fnret->is_ok and HEXIT('KO_ALREADY_EXISTING', msg => "The group $displayGroup already exists");
 }
 
-$fnret = OVH::Bastion::is_account_existing(account => $group);
-$fnret->is_err and HEXIT($fnret);
-$fnret->is_ok and HEXIT('KO_ALREADY_EXISTING', msg => "The account $group already exists");
+if (getpwnam($group)) {
+    HEXIT('KO_ALREADY_EXISTING', msg => "The account $group already exists");
+}
 
 #<PARAMS:GROUP
 
@@ -189,7 +189,7 @@ foreach my $gr ("$group-owner", "$group-gatekeeper", "$group-aclkeeper", "osh-wh
 }
 
 osh_debug("Adding allowkeeper to group $group");
-$fnret = OVH::Bastion::add_user_to_group(group => $group, user => 'allowkeeper', groupType => 'key');
+$fnret = OVH::Bastion::sys_addmembertogroup(group => $group, user => 'allowkeeper');
 $fnret or HEXIT($fnret);
 
 osh_info("Adding $owner to owner, gatekeeper, aclkeeper and main groups of $shortGroup");

@@ -34,27 +34,24 @@ if (!$account) {
 
 #<HEADER
 #>RIGHTSCHECK
-if ($self eq 'root') {
+if ($Self->isLocalRoot) {
     osh_debug "Real root, skipping checks of permissions";
 }
 else {
     # need to perform another security check
     $fnret = OVH::Bastion::is_user_in_group(
-        user  => $self,
+        user  => $Self->sysUser,
         group => "osh-accountUnlock"
     );
     if (!$fnret) {
-        HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $self");
+        HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $Self");
     }
 }
 
 #<RIGHTSCHECK
 #>PARAMS:ACCOUNT
-osh_debug("Checking account");
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret or HEXIT($fnret);
-$account = $fnret->value->{'account'};    # untainted
-
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or HEXIT($Account);
 #<PARAMS:ACCOUNT
 
 osh_info("Attempting to unlock account... system helper output will follow.");
@@ -63,9 +60,9 @@ osh_info("\n");
 # we need a list because we want to try in that specific order
 my @programs = qw{ faillock pam_tally2 pam_tally };
 my %cmds     = (
-    faillock   => [qw{ faillock --user },  $account],
-    pam_tally2 => [qw{ pam_tally2 -u },    $account, '-r'],
-    pam_tally  => [qw{ pam_tally --user }, $account, '--reset'],
+    faillock   => [qw{ faillock --user },  $Account->sysUser],
+    pam_tally2 => [qw{ pam_tally2 -u },    $Account->sysUser, '-r'],
+    pam_tally  => [qw{ pam_tally --user }, $Account->sysUser, '--reset'],
 );
 
 my $found;
@@ -79,7 +76,7 @@ foreach my $program (@programs) {
 if (!$found) {
     if (OVH::Bastion::is_linux()) {
         warn_syslog(
-            "Couldn't unlock account $account, as neither faillock, pam_tally2 or pam_tally seem to be installed");
+            "Couldn't unlock account $Account, as neither faillock, pam_tally2 or pam_tally seem to be installed");
         HEXIT('ERR_HELPER_MISSING', msg => "Found no unlock helper on this system. Please contact your sysadmin!");
     }
     else {
@@ -96,8 +93,8 @@ if (!$fnret) {
     elsif ($fnret->value->{'stdout'}) {
         $error = $fnret->value->{'stdout'}[0];
     }
-    warn_syslog("Got an error trying to unlock account $account through $found, first returned line was '$error'");
-    HEXIT R('ERR_INTERNAL', msg => "Failed to unlock $account");
+    warn_syslog("Got an error trying to unlock account $Account through $found, first returned line was '$error'");
+    HEXIT R('ERR_INTERNAL', msg => "Failed to unlock $Account");
 }
 
-HEXIT('OK', value => {account => $account}, msg => "Account '$account' has been successfully unlocked.");
+HEXIT('OK', value => {account => $Account->name}, msg => "Account '$Account' has been successfully unlocked.");

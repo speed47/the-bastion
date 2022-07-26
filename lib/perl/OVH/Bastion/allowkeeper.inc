@@ -6,6 +6,14 @@ use common::sense;
 
 use Time::Piece;    # $t->strftime
 use Carp;
+use List::Util qw{ any none };
+
+sub is_bastion_account_valid_and_existing { # FIXME kill me after MIGRA
+    my %params = @_;
+    my $A =OVH::Bastion::Account->newFromName($params{'account'}, check => 1);
+    $A or return $A;
+    return R('OK', value => { account => $A->name, sysaccount=>$A->sysUser, remoteaccount=>$A->remoteName, realm =>$A->realm});
+}
 
 # Check if a system user belongs to a specific system group
 sub is_user_in_group {
@@ -156,6 +164,19 @@ sub get_next_available_uid {
 # all ACL modifications (on groups, on accounts, including group-guests) are handled here
 sub access_modify {
     my %params = @_;
+    my $fnret = OVH::Bastion::check_args(\%params,
+        # action: add or del
+        # ip: can be a single ip or prefix
+        # way: group, groupguest, personal
+        mandatory => [qw{ action ip way }],
+        # user: if undef, means a user-wildcard access
+        # port: if undef, means a port-wildcard access
+        optionalFalseOk => [qw{ user port ttl comment forceKey forcePassword }],
+        # group: only for way=group or way=groupguest
+        # Account: only for way=personal
+        optional => [qw{ Account group }],
+    );
+    $fnret or return $fnret;
 
     my $action = $params{'action'};                                              # add or del
 
@@ -168,18 +189,10 @@ sub access_modify {
 
     my $way     = $params{'way'};        # group, groupguest, personal
     my $group   = $params{'group'};      # only for way=group or way=groupguest
-    my $account = $params{'account'};    # only for way=personal
+    my $Account = $params{'Account'};    # only for way=personal
 
     my $forceKey      = $params{'forceKey'};
     my $forcePassword = $params{'forcePassword'};
-
-    my $fnret;
-
-    foreach my $mandatoryParam (qw/action ip way/) {
-        if (!$params{$mandatoryParam}) {
-            return R('ERR_MISSING_PARAMETER', msg => "Missing parameter '$mandatoryParam'");
-        }
-    }
 
     # due to how plugins work, sometimes user and port are just '', make them undef in those cases
     undef $user if (defined $user && $user eq '');
@@ -188,15 +201,14 @@ sub access_modify {
     # check way
     if ($way eq 'personal') {
         return R('ERR_INVALID_PARAMETER', msg => "Group parameter specified with way=personal") if defined $group;
-        return R('ERR_MISSING_PARAMETER', msg => "Account parameter mandatory with way=personal")
-          if not defined $account;
+        return R('ERR_MISSING_PARAMETER', msg => "Account parameter mandatory with way=personal") if !$Account;
     }
     elsif ($way eq 'group') {
-        return R('ERR_MISSING_PARAMETER', msg => "Group parameter mandatory with way=group")   if not defined $group;
-        return R('ERR_INVALID_PARAMETER', msg => "Account parameter specified with way=group") if defined $account;
+        return R('ERR_MISSING_PARAMETER', msg => "Group parameter mandatory with way=group")   if !defined $group;
+        return R('ERR_INVALID_PARAMETER', msg => "Account parameter specified with way=group") if $Account;
     }
     elsif ($way eq 'groupguest') {
-        if (not defined $account or not defined $group) {
+        if (!$Account || !defined $group) {
             return R('ERR_MISSING_PARAMETER', msg => "Account or group parameter missing with way=groupguest");
         }
     }
@@ -228,15 +240,14 @@ sub access_modify {
     }
 
     # check account
-    my ($remoteaccount, $sysaccount);
-    if (defined $account) {
-
+    if ($Account) {
         # accountType==normal : account must NOT be a realm_* account (but can be a realm/jdoe account)
-        $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, accountType => 'normal');
+        $fnret = $Account->check();
         $fnret or return $fnret;
-        $sysaccount    = $fnret->value->{'sysaccount'};
-        $account       = $fnret->value->{'account'};
-        $remoteaccount = $fnret->value->{'remoteaccount'};
+
+        if (none { $Account->type eq $_ } qw{ local remote }) {
+            return R('ERR_INVALID_ACCOUNT', msg => "The account '$Account' is neither a local or remote account");
+        }
     }
 
     # check group
@@ -279,16 +290,24 @@ sub access_modify {
     my ($requester)  = $ENV{'SUDO_USER'} =~ /([0-9a-zA-Z_.-]+)/;
 
     # requester can never be a realm_* account, because it's shared and should not be able to add access to anything
-    return R('ERR_SECURITY_VIOLATION', msg => "Requester can't be a realm user") if $requester =~ /^realm_/;
+    my $RequesterAccount = OVH::Bastion::Account->newFromName($requester, check => 1); # FIXME is this root sometimes?
+    $fnret = $RequesterAccount->check();
+    $fnret or return $fnret;
+
+    if (none { $RequesterAccount->type eq $_ } qw{ local remote }) {
+        warn_syslog("access_modify: requester account '$RequesterAccount' is not local or remote");
+        return R('ERR_SECURITY_VIOLATION',
+            msg => "The requester account '$RequesterAccount' is neither a local or remote account");
+    }
 
     my @one_should_succeed;
     my $expected_running_as = 'allowkeeper';
 
     if ($way eq 'personal') {
-        if ($requester eq $account) {
+        if ($RequesterAccount eq $Account) {
             push @one_should_succeed,
               OVH::Bastion::is_user_in_group(
-                user  => $requester,
+                user  => $RequesterAccount->sysUser,
                 group => 'osh-self' . ucfirst($action) . 'PersonalAccess',
                 sudo  => 1
               );
@@ -297,7 +316,7 @@ sub access_modify {
         # this is not a else here: somebody who has the account* right doesn't need the self* right
         push @one_should_succeed,
           OVH::Bastion::is_user_in_group(
-            user  => $requester,
+            user  => $RequesterAccount->sysUser,
             group => 'osh-account' . ucfirst($action) . 'PersonalAccess',
             sudo  => 1
           );
@@ -305,11 +324,11 @@ sub access_modify {
     elsif ($way eq 'group') {
         $expected_running_as = $group;
         push @one_should_succeed,
-          OVH::Bastion::is_group_aclkeeper(account => $requester, group => $shortGroup, superowner => 1, sudo => 1);
+          OVH::Bastion::is_group_aclkeeper(account => $RequesterAccount->sysUser, group => $shortGroup, superowner => 1, sudo => 1);
     }
     elsif ($way eq 'groupguest') {
         push @one_should_succeed,
-          OVH::Bastion::is_group_gatekeeper(account => $requester, group => $shortGroup, superowner => 1, sudo => 1);
+          OVH::Bastion::is_group_gatekeeper(account => $RequesterAccount->sysUser, group => $shortGroup, superowner => 1, sudo => 1);
     }
 
     if ($running_as ne $expected_running_as) {
@@ -317,25 +336,24 @@ sub access_modify {
         return R('ERR_SECURITY_VIOLATION', msg => "Current running user unexpected");
     }
 
-    if (grep({ $_ } @one_should_succeed) == 0 && $requester ne 'root') {
-        warn_syslog(
-                "Security violation: requesting user '$requester' doesn't have the right to do that (way=$way, group="
+    if (grep({ $_ } @one_should_succeed) == 0 && !$RequesterAccount->isLocalRoot) {
+        warn_syslog("Security violation: requesting user '$RequesterAccount' doesn't have the right to do that "
+            . "(way=$way, group="
               . ($shortGroup ? '<u>' : $shortGroup)
               . ")");
         return R('ERR_SECURITY_VIOLATION', msg => "You're not allowed to do that");
     }
 
     # now, check if the access we're being asked to change is already in place or not
-    osh_debug(
-        "for action $action of $user\@$ip:$port of way $way with account=$account and group=$group, checking if already granted"
-    );
+    osh_debug("for action $action of $user\@$ip:$port of way $way with account=$Account and group=$group "
+        ."requested by $RequesterAccount, checking if already granted");
     $fnret = OVH::Bastion::is_access_way_granted(
         user       => $user,
         ip         => $ip,
         port       => $port,
         way        => $way,
         group      => $shortGroup,
-        account    => $account,
+        account    => $Account ? $Account->name : undef,
         exactMatch => 1,             # we're checking if the exact right we're asked to modify exists or not
     );
     osh_debug("... result is $fnret");
@@ -478,15 +496,15 @@ sub access_modify {
     # then call the sub we just defined
     delete $params{'file'};
     my $ret;
-    my $prefix = $remoteaccount ? "allowed_$remoteaccount" : "allowed";
+    my $prefix = ($Account && $Account->remoteName) ? "allowed_".$Account->remoteName : "allowed";
     if ($way eq 'personal') {
-        $ret = $_access_modify_file->(%params, file => "/home/allowkeeper/$sysaccount/$prefix.private");
+        $ret = $_access_modify_file->(%params, file => $Account->allowedPrivateFile);
     }
     elsif ($way eq 'group') {
         $ret = $_access_modify_file->(%params, file => "/home/$group/allowed.ip");
     }
     elsif ($way eq 'groupguest') {
-        $ret = $_access_modify_file->(%params, file => "/home/allowkeeper/$sysaccount/$prefix.partial.$shortGroup");
+        $ret = $_access_modify_file->(%params, file => "/home/allowkeeper/".$Account->sysUser."/$prefix.partial.$shortGroup");
     }
     osh_debug("_access_modify_file() said $ret");
     return $ret if defined $ret;
@@ -577,37 +595,6 @@ sub is_valid_group_and_existing {
     $fnret or return $fnret;
     $params{'group'} = $fnret->value->{'group'};
     return OVH::Bastion::is_group_existing(%params, user_friendly_error => 1);
-}
-
-# Add a user to a group
-sub add_user_to_group {
-    my %params      = @_;
-    my $group       = $params{'group'};
-    my $user        = $params{'user'};
-    my $accountType = $params{'accountType'};
-    my $groupType   = $params{'groupType'};
-    my $fnret;
-
-    osh_debug('validating user');
-    $fnret = OVH::Bastion::is_account_valid(account => $user, accountType => $accountType);
-    $fnret or return $fnret;
-    osh_debug('user is ok');
-    $user = $fnret->value->{'account'} || $fnret->value->{'realm'};
-
-    osh_debug('validating group name');
-    if ($groupType) {
-        $fnret = OVH::Bastion::is_valid_group(group => $group, groupType => $groupType);
-    }
-    else {
-        $fnret = OVH::Bastion::is_valid_group(group => $group);
-    }
-    $fnret or return $fnret;
-    osh_debug('group name is ok');
-    $group = $fnret->value->{'group'};
-
-    $fnret = OVH::Bastion::sys_addmembertogroup(group => $group, user => $user);
-    $fnret or return R('ERR_USERMOD_FAILED', msg => "Error while adding $user to group $group (" . $fnret->msg . ")");
-    return R('OK');
 }
 
 # return the list of the bastion groups (i.e. not the system group list)
@@ -708,110 +695,6 @@ sub get_realm_list {
     return R('OK', value => \%users);
 }
 
-# check if account is a bastion admin (gives access to adminXyz commands)
-# hint: an admin is also always a superowner
-sub is_admin {
-    my %params  = @_;
-    my $sudo    = $params{'sudo'};      # we're run under sudo
-    my $account = $params{'account'};
-    my $cache   = $params{'cache'};     # allow cache use of sys_getgr_name() through is_user_in_group()
-
-    if ($account) {
-        ;                               #Carp::confess "FIXME use Account::isAdmin()";    # FIXME
-    }
-
-    $account = $sudo ? $ENV{'SUDO_USER'} : OVH::Bastion::get_user_from_env()->value;
-
-    if (not $account) {
-        return R('ERR_INTERNAL_ERROR');
-    }
-    if (not $sudo and exists $ENV{'SUDO_USER'}) {
-
-        # only legit case is if we have osh.pl under sudo because of an admin (adminSudo / ssh-as), check this
-        if (not OVH::Bastion::is_admin(account => $ENV{'SUDO_USER'}, sudo => 1)) {
-            warn_syslog("is_admin(): wasn't expected to be called under sudo, but was, with user "
-                  . $ENV{'SUDO_USER'}
-                  . " from account "
-                  . $params{'account'});
-            return R('ERR_SECURITY_VIOLATION',
-                msg => "Wasn't expected to be called under sudo, but was, with user " . $ENV{'SUDO_USER'});
-        }
-    }
-
-    my $adminList = OVH::Bastion::config('adminAccounts')->value();
-    if (grep { $account eq $_ } @$adminList) {
-        return OVH::Bastion::is_user_in_group(group => "osh-admin", user => $account, cache => $cache);
-    }
-    return R('KO_ACCESS_DENIED');
-}
-
-# check if account is a superowner
-# hint: an admin is also always a superowner
-sub is_super_owner {
-    my %params  = @_;
-    my $sudo    = $params{'sudo'};      # we're run under sudo
-    my $account = $params{'account'};
-    my $cache   = $params{'cache'};     # allow cache use of sys_getgr_name() through is_user_in_group()
-
-    if (not $account) {
-        $account = $sudo ? $ENV{'SUDO_USER'} : OVH::Bastion::get_user_from_env()->value;
-    }
-
-    if (not $account) {
-        return R('ERR_INTERNAL_ERROR');
-    }
-    if (not $sudo and exists $ENV{'SUDO_USER'}) {
-
-        # only legit case is if we have osh.pl under sudo because of an admin (adminSudo / ssh-as), check this
-        if (not OVH::Bastion::is_admin(account => $ENV{'SUDO_USER'}, sudo => 1)) {
-            warn_syslog("is_super_owner(): wasn't expected to be called under sudo, but was, with user "
-                  . $ENV{'SUDO_USER'}
-                  . " from account "
-                  . $params{'account'});
-            return R('ERR_SECURITY_VIOLATION',
-                msg => "Wasn't expected to be called under sudo, but was, with user " . $ENV{'SUDO_USER'});
-        }
-    }
-
-    my $superownerList = OVH::Bastion::config('superOwnerAccounts')->value();
-    if (grep { $account eq $_ } @$superownerList) {
-        return OVH::Bastion::is_user_in_group(group => "osh-superowner", user => $account, cache => $cache);
-    }
-
-    # if admin, then we're good too
-    return OVH::Bastion::is_admin(account => $account, sudo => $sudo, cache => $cache);
-}
-
-# check if account is an auditor
-sub is_auditor {
-    my %params  = @_;
-    my $sudo    = $params{'sudo'};      # we're run under sudo
-    my $account = $params{'account'};
-    my $cache   = $params{'cache'};     # allow cache use of sys_getgr_name() through is_user_in_group()
-
-    if (not $account) {
-        $account = $sudo ? $ENV{'SUDO_USER'} : OVH::Bastion::get_user_from_env()->value;
-    }
-
-    if (not $account) {
-        return R('ERR_INTERNAL_ERROR');
-    }
-    if (not $sudo and exists $ENV{'SUDO_USER'}) {
-
-        # only legit case is if we have osh.pl under sudo because of an admin (adminSudo / ssh-as), check this
-        if (not OVH::Bastion::is_admin(account => $ENV{'SUDO_USER'}, sudo => 1)) {
-            warn_syslog("is_auditor(): wasn't expected to be called under sudo, but was, with user "
-                  . $ENV{'SUDO_USER'}
-                  . " from account "
-                  . $params{'account'});
-            return R('ERR_SECURITY_VIOLATION',
-                msg => "Wasn't expected to be called under sudo, but was, with user " . $ENV{'SUDO_USER'});
-        }
-    }
-
-    return OVH::Bastion::is_user_in_group(group => "osh-auditor", user => $account);
-}
-
 # used by funcs below
 sub _has_group_role {
     my %params     = @_;
@@ -830,18 +713,6 @@ sub _has_group_role {
     if (not $account) {
         return R('ERR_MISSING_PARAMETER', msg => 'Expected parameter account');
     }
-    if (not $sudo and exists $ENV{'SUDO_USER'}) {
-
-        # only legit case is if we have osh.pl under sudo because of an admin (adminSudo / ssh-as), check this
-        if (not OVH::Bastion::is_admin(account => $ENV{'SUDO_USER'}, sudo => 1)) {
-            warn_syslog("_has_group_role(): wasn't expected to be called under sudo, but was, with user "
-                  . $ENV{'SUDO_USER'}
-                  . " from account "
-                  . $params{'account'});
-            return R('ERR_SECURITY_VIOLATION',
-                msg => "Wasn't expected to be called under sudo, but was, with user " . $ENV{'SUDO_USER'});
-        }
-    }
 
     my $group = "key$shortGroup";
 
@@ -851,10 +722,13 @@ sub _has_group_role {
     }
 
     # for the realm case, we need to test sysaccount and not just account
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, cache => $cache);
+    my $Account = OVH::Bastion::Account->newFromName($account);
+    $Account or return $Account;
+
+    $fnret = $Account->isExisting();
     $fnret or return $fnret;
 
-    my $sysaccount = $fnret->value->{'sysaccount'};
+    my $sysaccount = $Account->sysUser;
 
     $fnret = OVH::Bastion::is_user_in_group(user => $sysaccount, group => $group, cache => $cache);
     osh_debug("is <$sysaccount> in <$group> ? => " . ($fnret ? 'yes' : 'no'));
@@ -865,7 +739,7 @@ sub _has_group_role {
 
     # if superowner allowed, try it
     if ($superowner) {
-        if (OVH::Bastion::is_super_owner(account => $sysaccount, sudo => $sudo, cache => $cache)) {
+        if ($Account->isSuperOwner) {
             osh_debug("is <$sysaccount> in <$group> ? => no but superowner so YES!");
             return R('OK', value => {account => $account, sysaccount => $sysaccount, superowner => 1});
         }
@@ -954,15 +828,11 @@ sub get_remote_accounts_from_realm {
     my $cache  = $params{'cache'}; # allow cache use of sys_getpw_name() through is_bastion_account_valid_and_existing()
 
     $realm = "realm_$realm" if $realm !~ /^realm_/;
-    my $fnret =
-      OVH::Bastion::is_bastion_account_valid_and_existing(account => $realm, accountType => "realm", cache => $cache);
-    $fnret or return $fnret;
-
-    my $sysaccount     = $fnret->value->{'sysaccount'};
-    my $allowkeeperdir = "/home/allowkeeper/$sysaccount/";
+    my $RealmSupportAccount = OVH::Bastion::Account->newFromName($realm, type => "realm", check => 1);
+    $RealmSupportAccount or return $RealmSupportAccount;
 
     my %accounts;
-    if (opendir(my $dh, "/home/allowkeeper/$sysaccount")) {
+    if (opendir(my $dh, $RealmSupportAccount->allowkeeperHome)) {
         while (my $filename = readdir($dh)) {
             if ($filename =~ /allowed_([a-zA-Z0-9._-]+)\.(ip|partial|private)/) {
                 $accounts{$1} = 1;

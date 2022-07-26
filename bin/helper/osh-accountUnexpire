@@ -59,12 +59,8 @@ if (OVH::Bastion::get_user_from_env()->value ne $account) {
 #>PARAMS:ACCOUNT
 osh_debug("Checking account");
 
-my $Account = OVH::Bastion::Account->newFromName($account);
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
 $Account or HEXIT($Account);
-
-$fnret = $Account->check();
-$fnret or HEXIT($fnret);
-
 #<PARAMS:ACCOUNT
 
 $fnret = $Account->isNotExpired();

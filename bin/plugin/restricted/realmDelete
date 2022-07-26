@@ -11,9 +11,9 @@ use OVH::Bastion::Plugin qw( :DEFAULT help );
 
 my $remainingOptions = OVH::Bastion::Plugin::begin(
     argv    => \@ARGV,
-    header  => "delete an existing bastion account",
+    header  => "delete an existing bastion realm",
     options => {
-        'realm=s' => \my $wantedRealm,
+        'realm=s' => \my $realm
     },
     helptext => <<'EOF',
 Delete a bastion realm
@@ -32,16 +32,13 @@ my $fnret;
 #
 # params check
 #
-if (!$wantedRealm) {
+if (!$realm) {
     help();
     osh_exit 'ERR_MISSING_PARAMETER', "Missing 'realm' parameter";
 }
 
-my $pristineRealm = $wantedRealm;
-$wantedRealm = "realm_$wantedRealm";
-$fnret       = OVH::Bastion::is_bastion_account_valid_and_existing(account => $wantedRealm, accountType => "realm");
-$fnret or osh_exit $fnret;
-$wantedRealm = $fnret->value->{'account'};    # untaint
+my $RealmSupportAccount = OVH::Bastion::Account->newFromName("realm_$realm", type => "realm", check => 1);
+$RealmSupportAccount or osh_exit $RealmSupportAccount;
 
 osh_info "!!!! WARNING !!!! WARNING !!!! WARNING !!!! WARNING !!!! WARNING !!!!";
 osh_info "!!!! WARNING !!!! WARNING !!!! WARNING !!!! WARNING !!!! WARNING !!!!";
@@ -55,13 +52,13 @@ osh_info " ";
 my $sentence = <STDIN>;
 chomp $sentence;
 
-if ($sentence ne "Yes, do as I say and delete $pristineRealm, kthxbye") {
+if ($sentence ne "Yes, do as I say and delete $realm, kthxbye") {
     osh_exit 'ERR_OPERATOR_IS_DRUNK', "You're drunk, apparently, aborted.";
 }
 osh_info "OK, proceeding...";
 
 my @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountDelete';
-push @command, '--type', 'realm', '--account', $wantedRealm;
+push @command, '--type', 'realm', '--account', $RealmSupportAccount->name;
 
 osh_exit OVH::Bastion::helper(cmd => \@command);

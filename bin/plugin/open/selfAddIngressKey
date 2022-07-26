@@ -42,7 +42,7 @@ if (ref $remainingOptions eq 'ARRAY' and @$remainingOptions) {
 #
 my $fnret;
 
-my $pivEffectivePolicyEnabled = OVH::Bastion::is_effective_piv_account_policy_enabled(account => $Self->name);
+my $pivEffectivePolicyEnabled = $Self->isPivPolicyEffectivelyEnabled();
 
 # before requesting the ssh pubkey, if we have to do PIV, check we have the piv helper
 if (!OVH::Bastion::has_piv_helper()) {

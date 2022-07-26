@@ -46,12 +46,9 @@ if (!$account || !$policy || !$step) {
 #<HEADER
 
 #>PARAMS:ACCOUNT
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, localOnly => 1);
-$fnret or HEXIT($fnret);
-
-# get returned untainted value
-$account = $fnret->value->{'account'};
-
+osh_debug("Checking account");
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or HEXIT($Account);
 #<PARAMS:ACCOUNT
 
 #>PARAMS:POLICY
@@ -77,23 +74,21 @@ if ($step ne '1' && $step ne '2') {
 #<PARAMS:STEP
 
 #>RIGHTSCHECK
-if ($self eq 'root') {
+if ($Self->isLocalRoot) {
     osh_debug "Real root, skipping checks of permissions";
 }
-$fnret = OVH::Bastion::is_user_in_group(user => $self, group => "osh-accountPIV");
-if (!$fnret) {
-    HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $self");
+elsif (!OVH::Bastion::is_user_in_group(user => $Self->sysUser, group => "osh-accountPIV")) {
+    HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $Self");
 }
 
-if (OVH::Bastion::is_admin(account => $account, sudo => 1) && !OVH::Bastion::is_admin(account => $self, sudo => 1)) {
-    HEXIT('ERR_SECURITY_VIOLATION', msg => "You can't modify the account of an admin without being admin yourself");
+if ($Self->isAdmin && !$Account->isAdmin) {
+    ('ERR_SECURITY_VIOLATION', msg => "You can't modify the account of an admin without being admin yourself");
 }
 
 #<RIGHTSCHECK
 
 #>CODE
-$fnret =
-  OVH::Bastion::account_config(account => $account, key => OVH::Bastion::OPT_ACCOUNT_INGRESS_PIV_POLICY, public => 1);
+$fnret = $Account->getConfig("public/ingress_piv_policy");
 
 # no file means the policy is 'default' (we can also have a file with a written policy of 'default', it's the same)
 my $currentPolicy = $fnret ? $fnret->value : 'default';
@@ -101,8 +96,7 @@ my $currentPolicy = $fnret ? $fnret->value : 'default';
 # 'yes' is an old synonym of 'enforce'
 $currentPolicy = 'enforce' if $currentPolicy eq 'yes';
 
-$fnret =
-  OVH::Bastion::account_config(account => $account, key => OVH::Bastion::OPT_ACCOUNT_INGRESS_PIV_GRACE, public => 1);
+$fnret = $Account->getConfig("public/ingress_piv_grace");
 my $currentGrace = $fnret ? $fnret->value : 0;
 
 if ($step == 1) {
@@ -117,12 +111,7 @@ if ($step == 1) {
         }
 
         # no, ok: apply the requested policy
-        $fnret = OVH::Bastion::account_config(
-            account => $account,
-            key     => OVH::Bastion::OPT_ACCOUNT_INGRESS_PIV_POLICY,
-            public  => 1,
-            value   => $policy
-        );
+        $fnret = $Account->setConfig("public/ingress_piv_policy" => $policy);
         if (!$fnret) {
             warn_syslog(
                 "Couldn't apply the requested PIV policy '$policy' (current is '$currentPolicy'): " . $fnret->msg);
@@ -134,7 +123,7 @@ if ($step == 1) {
                 type     => 'account',
                 fields   => [
                     [action  => 'modify'],
-                    [account => $account],
+                    [account => $Account->name],
                     [item    => 'piv_policy'],
                     [old     => $currentPolicy],
                     [new     => $policy]
@@ -144,15 +133,9 @@ if ($step == 1) {
 
         # and delete any existing grace
         if ($currentGrace) {
-            $fnret = OVH::Bastion::account_config(
-                account => $account,
-                key     => OVH::Bastion::OPT_ACCOUNT_INGRESS_PIV_GRACE,
-                public  => 1,
-                delete  => 1
-            );
+            $fnret = $Account->deleteConfig("public/ingress_piv_grace");
             if (!$fnret) {
                 warn_syslog("Couldn't remove the grace TTL PIV policy: " . $fnret->msg);
-
                 # attempt to continue nevertheless...
             }
             else {
@@ -162,7 +145,7 @@ if ($step == 1) {
                     type     => 'account',
                     fields   => [
                         [action  => 'modify'],
-                        [account => $account],
+                        [account => $Account->name],
                         [item    => 'piv_grace'],
                         [old     => 'true'],
                         [new     => 'false'],
@@ -174,13 +157,9 @@ if ($step == 1) {
         HEXIT('OK', msg => "PIV policy set to '$policy' for this account");
     }
     else {
-        # grace is not really a policy per se, it just sets a grace period for which the account will behave as it had the "never" policy set
-        $fnret = OVH::Bastion::account_config(
-            account => $account,
-            key     => OVH::Bastion::OPT_ACCOUNT_INGRESS_PIV_GRACE,
-            public  => 1,
-            value   => (time() + $ttl)
-        );
+        # grace is not really a policy per se, it just sets a grace period for
+        # which the account will behave as it had the "never" policy set
+        $fnret = $Account->setConfig("public/ingress_piv_grace" => (time() + $ttl));
         if (!$fnret) {
             warn_syslog("Couldn't apply the requested grace ttl PIV policy: " . $fnret->msg);
             HEXIT($fnret);
@@ -191,7 +170,7 @@ if ($step == 1) {
             type     => 'account',
             fields   => [
                 [action  => 'modify'],
-                [account => $account],
+                [account => $Account->name],
                 [item    => 'piv_grace'],
                 [old     => 'false'],
                 [new     => 'true'],
@@ -204,9 +183,8 @@ if ($step == 1) {
 elsif ($step == 2) {
 
     # step2: now we're running under the own account's user, modify the authkeys file accordingly
-    my $pivAction =
-      (OVH::Bastion::is_effective_piv_account_policy_enabled(account => $account)->is_ok) ? 'enable' : 'disable';
-    $fnret = OVH::Bastion::ssh_ingress_keys_piv_apply(action => $pivAction, account => $account);
+    my $pivAction = ($Account->isPivPolicyEffectivelyEnabled()->is_ok) ? 'enable' : 'disable';
+    $fnret = OVH::Bastion::ssh_ingress_keys_piv_apply(action => $pivAction, account => $Account->name);
     $fnret or HEXIT($fnret);
 
     if ($pivAction eq 'enable') {

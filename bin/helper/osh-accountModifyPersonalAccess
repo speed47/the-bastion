@@ -57,16 +57,19 @@ if (!$result) {
     HEXIT('ERR_BAD_OPTIONS', msg => "Error parsing options: @optwarns");
 }
 
-if (not $action or not $ip or not $account or not $target) {
+if (!$action || !$ip || !$account || !$target) {
     HEXIT('ERR_MISSING_PARAMETER', msg => "Missing argument 'action' or 'ip' or 'account' or 'target'");
 }
 
 #<HEADER
 
-not defined $account and $account = $self;
+#>PARAMS:ACCOUNT
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or HEXIT($Account);
+#<PARAMS:ACCOUNT
 
 #>RIGHTSCHECK
-if ($target eq 'self' && $self ne $account) {
+if ($target eq 'self' && $Self ne $Account) {
     HEXIT('ERR_SECURITY_VIOLATION',
         msg => "Attempted to modify another account while you're only allowed to do it on yourself");
 }
@@ -74,7 +77,7 @@ if ($target eq 'self' && $self ne $account) {
 #<RIGHTSCHECK
 
 #>PARAMS:ACTION
-if (not grep { $action eq $_ } qw{ add del }) {
+if (!grep { $action eq $_ } qw{ add del }) {
     return R('ERR_INVALID_PARAMETER', msg => "expected 'add' or 'del' as an action");
 }
 
@@ -86,9 +89,8 @@ $port and $machine .= ":$port";
 $user and $machine = $user . '@' . $machine;
 
 # access_modify validates all its parameters, don't do it ourselves here for clarity
-$fnret = OVH::Bastion::access_modify(
+$fnret = $Account->accessModify(
     way           => 'personal',
-    account       => $account,
     action        => $action,
     user          => $user,
     ip            => $ip,
@@ -104,7 +106,7 @@ if ($fnret->err eq 'OK') {
         'OK',
         value => {
             action  => $action,
-            account => $account,
+            account => $Account->name,
             ip      => $ip,
             user    => $user,
             port    => $port,
@@ -112,14 +114,14 @@ if ($fnret->err eq 'OK') {
             comment => $comment
         },
         msg => $action eq 'add'
-        ? "Access to $machine was added to account $account$ttlmsg"
-        : "Access to $machine was removed from account $account$ttlmsg"
+        ? "Access to $machine was added to account $Account$ttlmsg"
+        : "Access to $machine was removed from account $Account$ttlmsg"
     );
 }
 elsif ($fnret->err eq 'OK_NO_CHANGE') {
     HEXIT('OK_NO_CHANGE',
         msg => $action eq 'add'
-        ? "Access to $machine was already granted to account $account, nothing done"
-        : "Access to $machine was not granted to account $account, nothing done");
+        ? "Access to $machine was already granted to account $Account, nothing done"
+        : "Access to $machine was not granted to account $Account, nothing done");
 }
 HEXIT($fnret);

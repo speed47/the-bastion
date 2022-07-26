@@ -62,12 +62,8 @@ osh_debug("Checking account");
 my $accounthome;
 my $Account;
 if ($account ne 'root') {
-    $Account = OVH::Bastion::Account->newFromName($account);
+    $Account = OVH::Bastion::Account->newFromName($account, check => 1);
     $Account or HEXIT($Account);
-
-    $fnret = $Account->check();
-    $fnret or return $fnret;
-
     $accounthome = $Account->home;
 }
 else {

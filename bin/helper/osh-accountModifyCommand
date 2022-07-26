@@ -46,12 +46,8 @@ if (not $account or not $command or not $action) {
 #<HEADER
 
 #>PARAMS:ACCOUNT
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, localOnly => 1);
-$fnret or HEXIT($fnret);
-
-# get returned untainted value
-$account = $fnret->value->{'account'};
-
+my $Account = OVH::Bastion::Account->newFromName($account, type => "local", check => 1);
+$Account or HEXIT($Account);
 #<PARAMS:ACCOUNT
 
 #>PARAMS:ACTION
@@ -103,32 +99,34 @@ if (grep { $command eq $_ } qw{ admin superowner }) {
     HEXIT('ERR_SECURITY_VIOLATION',
         msg => "Specified command ($command) can't be granted this way for security reasons");
 }
-if (grep { $command eq $_ } qw{ accountGrantCommand accountRevokeCommand } && !OVH::Bastion::is_admin(sudo => 1)) {
+if (grep { $command eq $_ } qw{ accountGrantCommand accountRevokeCommand } && !$Self->isAdmin) {
     HEXIT('ERR_SECURITY_VIOLATION',
         msg => "Specified command ($command) can only be granted by bastion admins for security reasons");
 }
 
 my $msg;
-$fnret = OVH::Bastion::is_user_in_group(user => $account, group => "osh-$command");
+$fnret = OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => "osh-$command");
 if ($action eq 'grant') {
-    HEXIT('OK_NO_CHANGE',
-        msg => "Account $account already has the right to use the $command plugin, no change required")
-      if $fnret;
+    if ($fnret) {
+        HEXIT('OK_NO_CHANGE',
+            msg => "Account $Account already has the right to use the $command plugin, no change required");
+    }
 
-    $fnret = OVH::Bastion::sys_addmembertogroup(user => $account, group => "osh-$command", noisy_stderr => 1);
+    $fnret = OVH::Bastion::sys_addmembertogroup(user => $Account->sysUser, group => "osh-$command", noisy_stderr => 1);
     $fnret or HEXIT($fnret);
 
-    $msg = "Successfully granted use of restricted command $command to $account";
+    $msg = "Successfully granted use of restricted command $command to $Account";
 }
 elsif ($action eq 'revoke') {
-    HEXIT('OK_NO_CHANGE',
-        msg => "Account $account did not have the right to use the $command plugin, no change required")
-      if !$fnret;
+    if (!$fnret) {
+        HEXIT('OK_NO_CHANGE',
+            msg => "Account $Account did not have the right to use the $command plugin, no change required");
+    }
 
-    $fnret = OVH::Bastion::sys_delmemberfromgroup(user => $account, group => "osh-$command", noisy_stderr => 1);
+    $fnret = OVH::Bastion::sys_delmemberfromgroup(user => $Account->sysUser, group => "osh-$command", noisy_stderr => 1);
     $fnret or HEXIT($fnret);
 
-    $msg = "Successfully revoked use of restricted command $command from $account";
+    $msg = "Successfully revoked use of restricted command $command from $Account";
 }
 
 HEXIT('OK', msg => $msg);

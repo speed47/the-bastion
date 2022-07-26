@@ -1,10 +1,12 @@
 package OVH::Bastion::Account;
 use common::sense;
 
+use Cwd; # getcwd
+use Fcntl;
 use Hash::Util qw{ lock_hashref lock_hashref_recurse unlock_hashref unlock_hashref_recurse lock_ref_value unlock_ref_value };
 use List::Util qw{ any none };
 use Memoize;
-use Cwd; # getcwd
+use Scalar::Util qw{ refaddr };
 
 use OVH::Bastion;
 use OVH::Result;
@@ -15,25 +17,54 @@ use overload (
     'ne' => 'ne',
 );
 
-# instantiate a new account corresponding to the one we have here,
-# this in effects nullify all cache handled by memoize for this new instance,
-# hence the name ->refresh()
-sub refresh {
-    my $this = shift;
-    return $this->newFromName($this->name);
+# we'll instruct memoize to use this hash,
+# so we can properly flush it by-instance when we need it
+my %CACHE;
+
+# we also need to define our own normalizer so that the instance
+# address is part of the hash key
+sub _normalize {
+    my ($func, $this, @args) = @_;
+    my @x = (refaddr($this), $func);
+    push @x, map { defined($_) ? $_ : chr(29) } @args;
+    return join("!", @x);
 }
 
-# FIXME double-check that memoize works at the instance level, aka 1 hashcache per instance!!
+sub _memoizify {
+    my $funcname = shift;
+    memoize(
+        $funcname,
+        SCALAR_CACHE => ['HASH' => \%CACHE],
+        LIST_CACHE => 'FAULT',
+        NORMALIZER => sub { unshift @_, $funcname; goto \&_normalize; }
+    );
+}
+
+# nullify all the cache for this instance, thanks to the
+# fact that we know the instance address is part of all the
+# cache keys for this instance
+sub refresh {
+    my $this = shift;
+    my $addr = refaddr($this);
+    my $nbdeleted = 0;
+    foreach my $key (keys %CACHE) {
+        if ($key =~ /^\Q$addr!/) {
+            delete $CACHE{$key};
+            $nbdeleted++;
+        }
+    }
+    return R('OK', value => $nbdeleted);
+}
 
 sub newFromEnv {
     my ($this, %p) = @_;
     return $this->newFromName(OVH::Bastion::get_user_from_env()->value, %p);
 }
 
-memoize('newLocalRoot');
+_memoizify('newLocalRoot');
 sub newLocalRoot {
     my ($this, %p) = @_;
-    $p{'isFake'} = 1;
+    $p{'isFake'} = 1; # FIXME do we use isFake for anything else that localRoot? if not, do we need it?
     return $this->newFromName('<root>', %p);
 }
 
@@ -43,7 +74,7 @@ sub newFromName {
     $p{'name'} = $name;
     my $fnret = OVH::Bastion::check_args(\%p,
         mandatory => [qw{ name }],
-        optional => [qw{ type }],
+        optional => [qw{ type check }],
         optionalFalseOk => [qw{ isFake }],
     );
     $fnret or return $fnret;
@@ -61,38 +92,59 @@ sub newFromName {
             sysUser => undef,
             isFake => 1,
         };
+        if ($p{'type'} eq 'localRoot') {
+            $Account->{'type'} = 'localRoot';
+        }
+        # FIXME else: type undef? meh, is isFake==localRoot? (see FIXME above)
     }
     else {
         # FIXME it means we can't newFromName() an account that is INVALID but EXISTING. is this a problem?
-        $fnret = _new_from_name(%p);
+        $fnret = _new_from_name(name => $p{'name'}, type => $p{'type'} || 'regular');
         $fnret or return $fnret;
         # we have either:
         # R('OK', value => {sysaccount => "realm_$1", realm => $1,    remoteaccount => $2,    account => "$1/$2"});
         # R('OK', value => {sysaccount => $1,         realm => undef, remoteaccount => undef, account => $1});
 
+        my $allowedPrefix = ($fnret->value->{'remoteaccount'} ? 'allowed_'.$fnret->value->{'remoteaccount'} : 'allowed');
         $Account = {
-            name       => $fnret->value->{'account'},           # joe   or acme/joe
-            sysUser    => $fnret->value->{'sysaccount'},        # joe   or realm_acme
-            remoteName => $fnret->value->{'remoteaccount'},     # undef or joe
-            realm      => $fnret->value->{'realm'},             # undef or acme
+            # main account attributes
+            name            => $fnret->value->{'account'},           # joe   or acme/joe
+            sysUser         => $fnret->value->{'sysaccount'},        # joe   or realm_acme
+            remoteName      => $fnret->value->{'remoteaccount'},     # undef or joe
+            realm           => $fnret->value->{'realm'},             # undef or acme
+            type            => $fnret->value->{'type'},              # local|remote|realm|localRoot
+            isFake          => 0,
 
-            home       => '/home/'.$fnret->value->{'sysaccount'}, # isExisting() will yell if /etc/passwd disagrees
-            allowkeeperHome => '/home/allowkeeper/'.$fnret->value->{'sysaccount'},
-            passHome        => '/home/'.$fnret->value->{'sysaccount'}.'/pass',
-            isFake     => 0,
+            ttyGroup        => $fnret->value->{'sysaccount'}.'-tty',
+
+            # folder and file locations related to this account
+            home                 => '/home/'.$fnret->value->{'sysaccount'}, # isExisting() will yell if /etc/passwd disagrees
+            allowkeeperHome      => '/home/allowkeeper/'.$fnret->value->{'sysaccount'},
+            allowedIpFile        => '/home/allowkeeper/'.$fnret->value->{'sysaccount'}."/$allowedPrefix.ip",
+            allowedPrivateFile   => '/home/allowkeeper/'.$fnret->value->{'sysaccount'}."/$allowedPrefix.private",
+            passHome             => '/home/'.$fnret->value->{'sysaccount'}.'/pass',
+            sshHome              => '/home/'.$fnret->value->{'sysaccount'}.'/.ssh',
+            ttyrecHome           => '/home/'.$fnret->value->{'sysaccount'}.'/ttyrec',
+            authorizedKeysFile   => '/home/'.$fnret->value->{'sysaccount'}.'/.ssh/authorized_keys2',
+            sshConfigFile        => '/home/'.$fnret->value->{'sysaccount'}.'/.ssh/config',
 
             # an Account instance may or may not actually exist on the system, until
             # ->isExisting() is called. If the account does exist, said func will
             # set the following params:
             uid        => undef,
             gid        => undef,
-            ttyGroup   => undef,
         };
     }
 
     bless $Account, 'OVH::Bastion::Account';
 
     lock_hashref_recurse($Account);
+
+    # have we been asked to check this account?
+    if ($p{'check'}) {
+        $fnret = $Account->check();
+        $fnret or return $fnret;
+    }
 
     return $Account;
 }
@@ -101,16 +153,35 @@ BEGIN {
     no strict "refs";
 
     # simple getters, they have no corresponding setter, as Account objects are immutable
-    foreach my $attr (qw{ isFake name sysUser remoteName realm allowkeeperHome ttyGroup }) {
+    foreach my $attr (qw{
+            name sysUser remoteName realm type home allowkeeperHome
+            passHome sshHome ttyrecHome
+            sshConfigFile authorizedKeysFile isFake ttyGroup
+        }) {
         *$attr = sub {
             my $this = shift;
             return $this->{$attr};
         };
     }
 
+    # simple getters that make no sense for specific account types, in which case we log a warning
+    # when they're called, and return undef
+    foreach my $attr (qw{ allowedIpFile allowedPrivateFile }) {
+        *$attr = sub {
+            my ($this, %p) = shift;
+            if (none { $this->type eq $_ } qw{ local remote }) {
+                OVH::Bastion::warn_syslog("Attempted to access attribute '$attr' on '$this' "
+                    . "which is of type ".$this->type);
+                return undef;
+            }
+            return $this->{$attr};
+        };
+    }
+
     # almost-simple getters, they just need to have a completely defined Account, hence
-    # they ensure that ->isExisting has been called first
-    foreach my $attr (qw{ uid gid home }) {
+    # they ensure that ->isExisting has been called first (it is memoized, so only
+    # expensive on the first call)
+    foreach my $attr (qw{ uid gid }) {
         *$attr = sub {
             my $this = shift;
             if (!defined($this->{$attr})) {
@@ -134,20 +205,19 @@ sub ne {
     return !($this eq $that);
 }
 
-memoize('getConfig');
-sub getConfig {
-    my ($this, $compositeKey, %p) = @_;
+# do NOT memoize this, as we're checking envvars and $<
+sub isLocalRoot {
+    my ($this, %p) = @_;
+    return R($this->isFake && $this->name eq '<root>' && $< == 0 && !$ENV{'SUDO_USER'} ? 'OK' : 'KO');
+}
 
-    my $fnret = OVH::Bastion::check_args(\%p);
-    $fnret or return $fnret;
+sub _config_file_from_composite_key {
+    my ($this, $compositeKey) = @_;
 
     my ($type, $key) = $compositeKey =~ m{^(private|public)/([a-zA-Z0-9_-]+)$};
     if (!$type || !$key) {
         return R('ERR_INVALID_PARAMETER', msg => "Invalid configuration key asked ($compositeKey)");
     }
-
-    $fnret = $this->check();
-    $fnret or return $fnret;
 
     # private:
     # /home/user/config.key
@@ -161,7 +231,23 @@ sub getConfig {
         $key
     );
 
-    # getter mode
+    return R('OK', value => { filename => $filename, type => $type });
+}
+
+_memoizify('getConfig');
+sub getConfig {
+    my ($this, $compositeKey, %p) = @_;
+
+    my $fnret = OVH::Bastion::check_args(\%p);
+    $fnret or return $fnret;
+
+    $fnret = $this->check();
+    $fnret or return $fnret;
+
+    $fnret = $this->_config_file_from_composite_key($compositeKey);
+    $fnret or return $fnret;
+
+    my $filename = $fnret->value->{'filename'};
     my $fh;
     if (!open($fh, '<', $filename)) {
         return R('ERR_CANNOT_OPEN_FILE', msg => "Error while trying to open file $filename for read ($!)");
@@ -171,7 +257,69 @@ sub getConfig {
     return R('OK', value => $getvalue);
 }
 
-memoize('isActive');
+sub setConfig {
+    my ($this, $compositeKey, $value, %p) = @_;
+
+    my $fnret = OVH::Bastion::check_args(\%p);
+    $fnret or return $fnret;
+
+    $fnret = $this->_config_file_from_composite_key($compositeKey);
+    $fnret or return $fnret;
+
+    my $filename = $fnret->value->{'filename'};
+    my $type = $fnret->value->{'type'};
+
+    # be nice and delete the cache of getConfig
+    if (delete $CACHE{refaddr($this)."!getConfig!$compositeKey"}) {
+        osh_debug("Account::setConfig($this): successfully deleted getConfig cache for $compositeKey");
+    }
+
+    unlink($filename);    # remove any previous value
+    my $fh;
+    # sysopen: avoid symlink attacks
+    if (!sysopen($fh, $filename, O_RDWR | O_CREAT | O_EXCL)) {
+        return R('ERR_CANNOT_OPEN_FILE', msg => "Error while trying to open file $filename for write ($!)");
+    }
+    print $fh $value;
+    close($fh);
+    chmod 0644, $filename;
+
+    if ($type eq 'public') {
+        # need to chown to allowkeeper:allowkeeper
+        my (undef, undef, $allowkeeperuid, $allowkeepergid) = getpwnam("allowkeeper");
+        chown $allowkeeperuid, $allowkeepergid, $filename;
+    }
+    return R('OK');
+}
+
+sub deleteConfig {
+    my ($this, $compositeKey, %p) = @_;
+
+    my $fnret = OVH::Bastion::check_args(\%p);
+    $fnret or return $fnret;
+
+    $fnret = $this->check();
+    $fnret or return $fnret;
+
+    $fnret = $this->_config_file_from_composite_key($compositeKey);
+    $fnret or return $fnret;
+
+    # be nice and delete the cache of getConfig
+    delete $CACHE{refaddr($this)."!getConfig!$compositeKey"};
+
+    my $filename = $fnret->value->{'filename'};
+    if (unlink($filename)) {
+        return R('OK');
+    }
+    elsif ($! =~ /no such file/i) {
+        return R('OK_NO_CHANGE');
+    }
+    else {
+        return R('ERR_DELETION_FAILED', msg => "Couldn't delete $this config $compositeKey: $!");
+    }
+}
+
+_memoizify('isActive');
 sub isActive {
     my $this = shift;
     my $fnret;
@@ -244,7 +392,7 @@ sub isActive {
     return R('KO_INACTIVE_ACCOUNT');
 }
 
-memoize('isTTLNotExpired');
+_memoizify('isTTLNotExpired');
 sub isTTLNotExpired {
     my ($this, %p) = @_;
     my $fnret;
@@ -287,7 +435,7 @@ sub isTTLNotExpired {
     return R('OK_NO_TTL');
 }
 
-memoize('isNotExpired');
+_memoizify('isNotExpired');
 sub isNotExpired {
     my ($this, %p) = @_;
     my $fnret;
@@ -385,11 +533,12 @@ sub isNotExpired {
     return R('ERR_INTERNAL_ERROR');
 }
 
-memoize('isExisting');
+_memoizify('isExisting');
 sub isExisting {
     my ($this, %p) = @_;
     my $fnret = OVH::Bastion::check_args(\%p,
         optional => [qw{ nocache }],
+        optionalFalseOk => [qw{ ignoreConfig }],
     );
     $fnret or return $fnret;
 
@@ -420,8 +569,7 @@ sub isExisting {
         $entry{'name'} = $newname;    # untaint
 
         if ($entry{'shell'} ne $OVH::Bastion::BASEPATH . "/bin/shell/osh.pl") {
-            # msg is the same as when the account is /really/ not found (see below), voluntarily
-            return R('KO_NOT_FOUND', msg => sprintf("Account '%s' doesn't exist", $this->name));
+            return R('ERR_NOT_BASTION_ACCOUNT', msg => sprintf("Account '%s' is not a bastion account", $this->name));
         }
 
         my ($newdir) = $entry{'home'} =~ m{([/a-zA-Z0-9._-]+)};                   # untaint
@@ -431,17 +579,32 @@ sub isExisting {
         $entry{'home'} = $newdir;
 
         if ($entry{'home'} ne $this->home) {
-            warn_syslog(sprintf("Account %s home is '%s' instead of '%s'", $this->name, $entry{'home'}, $this->home);
+            OVH::Bastion::warn_syslog(sprintf("Account %s home is '%s' instead of '%s'", $this->name, $entry{'home'}, $this->home));
             return R('ERR_SECURITY_VIOLATION', msg => "Mismatch between theoretical and actual home location");
         }
 
-        $entry{'ttyGroup'} = $this->sysUser."-tty";
-        if (!getgrnam($entry{'ttyGroup'})) {
-            # no corresponding tty group? hmm, weird, but not fatal...
-            $entry{'ttyGroup'} = undef;
+        if (!getgrnam($this->ttyGroup)) {
+            OVH::Bastion::warn_syslog(sprintf("The tty group '%s' of account '%s' doesn't exist", $this->ttyGroup, $this->name));
+            return R('ERR_MISSING_TTY_GROUP', msg => "The tty group of this account doesn't exist");
         }
 
-        foreach my $key (qw{ uid gid home ttyGroup }) {
+        if ($entry{'uid'} != $entry{'gid'}) {
+            OVH::Bastion::warn_syslog(sprintf("Account '%s' has mismatching UID (%d) and GID (%d)", $this->name, $entry{'uid'}, $entry{'gid'}));
+            return R('ERR_SECURITY_VIOLATION', msg => "Mismatch between UID and GID");
+        }
+
+        if (!$p{'ignoreConfig'}) {
+            # don't check for is_valid_uid if we have the ignoreConfig flag passed, as it means that the
+            # caller is currently loading and validating the configuration, and calling us to achieve that,
+            # so we can't use it to validate our own data, or we get a double-recursive loop
+            $fnret = OVH::Bastion::is_valid_uid(uid => $entry{'uid'}, type => 'user');
+            if (!$fnret) {
+                OVH::Bastion::warn_syslog(sprintf("Account '%s' has an invalid UID (%d): %s", $this->name, $entry{'uid'}, $fnret->msg));
+                return R('ERR_SECURITY_VIOLATION', msg => "Invalid UID for account");
+            }
+        }
+
+        foreach my $key (qw{ uid gid }) {
             unlock_ref_value($this, $key);
             $this->{$key} = $entry{$key};
             lock_ref_value($this, $key);
@@ -462,7 +625,7 @@ sub selfCheck {
     # if we are manipulating the a localRoot account, and we're running under root
     # privileges without sudo, then deem this account as valid so that scripts running
     # directly under root (such as the install script) find that $this is valid and carry on
-    if ($this->name eq '<root>' && $this->isFake && $< == 0 && !$ENV{'SUDO_USER'}) {
+    if ($this->isLocalRoot) {
         return R('OK');
     }
 
@@ -499,7 +662,7 @@ sub selfCheck {
 }
 
 # checks that isExisting() and potentially other tiny things to ensure the account is sane
-memoize('check');
+_memoizify('check');
 sub check {
     my ($this, %p) = @_;
     my $fnret;
@@ -529,7 +692,7 @@ sub _new_from_name {
     $fnret or return $fnret;
 
     my $name = $p{'name'};
-    my $type = $p{'type'} || 'regular';
+    my $type = $p{'type'};
     # - local: disallow realm-formatted accounts aka $realm/$remoteself
     # - remote: allow only realm-formatted accounts aka $realm/$remoteself
     # - regular: either a local or remote account (autodetect and allow both)
@@ -602,7 +765,13 @@ sub _new_from_name {
         elsif (length($2) < 2) {
             return R('KO_TOO_SMALL', msg => "Remote account name is too short, length($2) < 2");
         }
-        return R('OK', value => {sysaccount => "realm_$1", realm => $1, remoteaccount => $2, account => "$1/$2", type => 'realm'}); # untainted
+        return R('OK', value => {
+            sysaccount => "realm_$1",
+            realm => $1,
+            remoteaccount => $2,
+            account => "$1/$2",
+            type => 'remote'
+        });
     }
     elsif ($name =~ m/^([a-zA-Z0-9._-]+)$/) {
         $name = $1; # untaint
@@ -637,7 +806,13 @@ sub _new_from_name {
             }
         }
 
-        return R('OK', value => {sysaccount => $name, realm => undef, remoteaccount => undef, account => $name, type => 'local'});  # untainted
+        return R('OK', value => {
+            sysaccount => $name,
+            realm => undef,
+            remoteaccount => undef,
+            account => $name,
+            type => ($name =~ /^realm_/ ? 'realm' : 'local'),
+        });
     }
     else {
         return R('KO_FORBIDDEN_CHARS', msg => "$whatis name '$name' contains forbidden characters");
@@ -659,17 +834,17 @@ sub _has_role {
     return R('KO_ACCESS_DENIED', msg => "Account ".$this->name." is not a bastion $role");
 }
 
-memoize('isAdmin');
+_memoizify('isAdmin');
 sub isAdmin      { my $this = shift; return $this->_has_role("administrator", "adminAccounts", "osh-admin"); }
-memoize('isSuperOwner');
+_memoizify('isSuperOwner');
 sub isSuperOwner { my $this = shift; return $this->_has_role("superowner", "superOwnerAccounts", "osh-superowner") || $this->isAdmin; }
-memoize('isAuditor');
+_memoizify('isAuditor');
 sub isAuditor    { my $this = shift; return $this->_has_role("auditor", undef, "osh-auditor"); }
 
 # return a hash with keys being the bastion group names and as values,
 # a hash of relations to this account, i.e. member, guest, aclkeeper,
 # gatekeeper, owner.
-memoize('getGroups');
+_memoizify('getGroups');
 sub getGroups {
     my ($this, %p) = @_;
 
@@ -713,7 +888,7 @@ sub getGroups {
     return R('OK', value => \%result);
 }
 
-memoize('canExecutePlugin');
+_memoizify('canExecutePlugin');
 sub canExecutePlugin {
     my ($this, $plugin, %p) = @_;
     $p{'plugin'} = $plugin;
@@ -838,6 +1013,170 @@ sub canExecutePlugin {
 
     # still here ? sorry.
     return R('KO_UNKNOWN_PLUGIN', value => {type => 'open'}, msg => "Unknown command");
+}
+
+_memoizify('getPersonalKeys');
+sub getPersonalKeys {
+    my ($this, %p) = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        optionalFalseOk => [qw{ forceKey listOnly noexec }],
+    );
+    $fnret or return $fnret;
+
+    $fnret = $this->isExisting();
+    $fnret or return $fnret;
+
+    return OVH::Bastion::get_pub_keys_from_directory(
+        dir         => $this->sshHome,
+        pattern     => qr/^private\.pub$|^id_[a-z0-9]+[_.]private\.\d+\.pub$/,
+        listOnly    => $p{'listOnly'} ? 1 : 0, # don't be slow and don't parse the keys (by calling ssh-keygen -lf)
+        forceKey    => $p{'forceKey'},
+        wantPrivate => 1,
+        noexec      => $p{'noexec'} ? 1 : 0,
+    );
+}
+
+sub setSshConfig {
+    my ($this, %p) = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ key }],
+        mandatoryFalseOk => [qw{ value }], # if value is undef, remove $key
+    );
+    $fnret or return $fnret;
+
+    $fnret = $this->isExisting();
+    $fnret or return $fnret;
+
+    my $key = lc($p{'key'});
+
+    # read file content
+    $fnret = $this->getSshConfig();
+    $fnret or return $fnret;
+    my %keys = %{$fnret->value()};
+
+    # remove key if it already exists
+    delete $keys{$key};
+
+    # add new key+value
+    $keys{$key} = $p{'value'} if defined $p{'value'};
+
+    # write modified file. to avoid symlink attacks, remove it then reopen it with sysopen()
+    unlink($this->sshConfigFile);
+    if (sysopen(my $sshconfig_fd, $this->sshConfigFile, O_RDWR | O_CREAT | O_EXCL)) {
+        foreach my $keyWrite (sort keys %keys) {
+            print $sshconfig_fd $keyWrite . " " . $keys{$keyWrite} . "\n";
+        }
+        close($sshconfig_fd);
+    }
+    else {
+        return R('ERR_CANNOT_OPEN_FILE', msg => "Couldn't open ssh config file for write: $!");
+    }
+
+    # ensure file is readable by everyone (and mainly the account itself)
+    if (!chmod 0644, $this->sshConfigFile) {
+        return R('ERR_CANNOT_CHMOD', msg => "Couldn't ensure the ssh config file perms are correct");
+    }
+
+    return R('OK');
+}
+
+sub getSshConfig {
+    my ($this, %p) = @_;
+
+    my $fnret = $this->isExisting();
+    $fnret or return $fnret;
+
+    # read file content. If it doesn't exist, not a problem
+    my $sshconfig_data;
+    if (open(my $sshconfig_fd, '<', $this->sshConfigFile)) {
+        local $/ = undef;
+        $sshconfig_data = <$sshconfig_fd>;
+        close($sshconfig_fd);
+
+        # ensure we don't have any Host or Match directive.
+        # If we do, bail out: the file has been modified manually by someone
+        if ($sshconfig_data =~ /^\s*(Host|Match)\s/mi) {
+            return R('ERR_FILE_LOCALLY_MODIFIED',
+                msg => "The ssh configuration of this account has been modified manually. "
+                    ." As we can't guarantee modifying it won't cause adverse effects, modification aborted."
+            );
+        }
+
+        # remove empty lines & comments
+        my @lines = grep { /./ && !/^\s*#/ } split(/\n/, $sshconfig_data);
+
+        # lowercase all keys
+        my %keys = map { m/^(\S+)\s+(.+)$/ ? (lc($1) => $2) : () } @lines;
+
+        return R('OK_EMPTY') if !%keys;
+        return R('OK', value => \%keys);
+    }
+
+    return R($! =~ /permission|denied/i ? 'ERR_ACCESS_DENIED' : 'OK_EMPTY');
+}
+
+# return the effective PIV ingress keys policy for this account,
+# can be either enabled or disabled, depending on 3 config params,
+# ingressRequirePIV (global setting), the account's own potential
+# ingress PIV policy and the potential account grace period, both
+# set by accountPIV
+sub isPivPolicyEffectivelyEnabled {
+    my ($this, %p)  = @_;
+
+    my $fnret = $this->isExisting();
+    $fnret or return $fnret;
+
+    my $accountPolicy;
+    $fnret = $this->getConfig("public/ingress_piv_policy");
+    if (!$fnret) {
+
+        # if file is not found, it means the account PIV policy is the default one.
+        # this is the same as having its config set explicitly to 'default'
+        $accountPolicy = 'default';
+    }
+    else {
+        $accountPolicy = $fnret->value;
+
+        # previously, 'enforce' was stored as 'yes'
+        $accountPolicy = 'enforce' if $accountPolicy eq 'yes';
+    }
+
+    # if account policy is set to never, then the global policy doesn't matter
+    return R('KO_DISABLED') if $accountPolicy eq 'never';
+
+    # if account is currently in a non-expired grace period, then the global policy doesn't matter either
+    $fnret = $this->getConfig("public/ingress_piv_grace");
+    my $expiry = $fnret->value || 0;
+    my $human  = OVH::Bastion::duration2human(seconds => ($expiry - time()))->value;
+    return R('KO_DISABLED', msg => "$this is still in grace period for " . $human->{'human'}) if (time() < $expiry);
+
+    # if account is set to enforce, and it's not in grace (handled above), then it's enabled
+    return R('OK_ENABLED', msg => "$this policy is set to enforce") if $accountPolicy eq 'enforce';
+
+    # otherwise the global policy applies
+    return OVH::Bastion::config('ingressRequirePIV')->value()
+      ? R('OK_ENABLED',  msg => "inherits the globally enabled policy")
+      : R('KO_DISABLED', msg => "inherits the globally disabled policy");
+}
+
+sub accessModify {
+    my ($this, %p) = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        # action: add or del
+        # ip: can be a single ip or prefix
+        # way: group, groupguest, personal
+        mandatory => [qw{ action ip way }],
+        # user: if undef, means a user-wildcard access
+        # port: if undef, means a port-wildcard access
+        optionalFalseOk => [qw{ user port comment forceKey forcePassword ttl }],
+        # group: only for way=group or way=groupguest
+        optional => [qw{ group }],
+    );
+
+    my $fnret = $this->isExisting();
+    $fnret or return $fnret;
+
+    return OVH::Bastion::access_modify(Account => $this, %p);
 }
 
 1;

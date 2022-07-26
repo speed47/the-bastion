@@ -9,61 +9,54 @@ use OVH::Result;
 use OVH::Bastion;
 
 sub preconditions {
-    my %params  = @_;
-    my $Self    = $params{'Self'};
-    my $sudo    = $params{'sudo'};
-    my $group   = $params{'group'};
-    my $account = $params{'account'};
-    my $size    = $params{'size'};
-    my $context = $params{'context'};
+    my %p = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ Self size context }],
+        optionalFalseOk => [qw{ group account sudo }],
+    );
+    $fnret or return $fnret;
 
-    my $fnret;
-    my ($shortGroup, $passhome, $base);
+    my ($group, $shortGroup, $passhome, $base, $Account);
 
-    if (!$size || !$context) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing argument 'size' or 'context'");
-    }
-
-    if ($context eq 'group') {
-        if (not $group) {
+    if ($p{'context'} eq 'group') {
+        if (not $p{'group'}) {
             return R('ERR_MISSING_PARAMETER', msg => "Missing argument 'group'");
         }
-        $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => 'key');
+        $fnret = OVH::Bastion::is_valid_group_and_existing(group => $p{'group'}, groupType => 'key');
         $fnret or return $fnret;
         $group      = $fnret->value->{'group'};
         $shortGroup = $fnret->value->{'shortGroup'};
         $passhome   = "/home/$group/pass";
         $base       = "$passhome/$shortGroup";
     }
-    elsif ($context eq 'account') {
-        if (not $account) {
+    elsif ($p{'context'} eq 'account') {
+        if (not $p{'account'}) {
             return R('ERR_MISSING_PARAMETER', msg => "Missing argument 'account'");
         }
-        $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-        $fnret or return $fnret;
-        $account  = $fnret->value->{'account'};
-        $passhome = "/home/$account/pass";
-        $base     = "$passhome/$account";
+        $Account = OVH::Bastion::Account->newFromName($p{'account'}, check => 1);
+        $Account or return $Account;
+        $passhome = $Account->passHome;
+        $base     = "$passhome/".$Account->sysUser;
     }
     else {
         return R('ERR_INVALID_PARAMETER', msg => "Expected a context 'group' or 'account'");
     }
 
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $self);
+    my $Self = $p{'Self'};
+    $fnret = $Self->selfCheck();
     $fnret or return $fnret;
-    $self = $fnret->value->{'account'};
 
-    return R('ERR_INVALID_PARAMETER', msg => "The argument 'size' must be an integer") if $size !~ /^\d+$/;
-    return R('ERR_INVALID_PARAMETER', msg => "Specified size must be >= 8")            if $size < 8;
-    return R('ERR_INVALID_PARAMETER', msg => "Specified size must be <= 127")          if $size > 128;
+    return R('ERR_INVALID_PARAMETER', msg => "The argument 'size' must be an integer") if $p{'size'} !~ /^\d+$/;
+    return R('ERR_INVALID_PARAMETER', msg => "Specified size must be >= 8")            if $p{'size'} < 8;
+    return R('ERR_INVALID_PARAMETER', msg => "Specified size must be <= 127")          if $p{'size'} > 128;
 
-    if ($context eq 'account' && $Self ne $Account) {
-        $fnret = OVH::Bastion::is_user_in_group(user => $self, group => "osh-accountGeneratePassword");
-        $fnret or return R('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $self");
+    if ($p{'context'} eq 'account' && $Self ne $Account) {
+        $fnret = OVH::Bastion::is_user_in_group(user => $Self->sysUser, group => "osh-accountGeneratePassword");
+        $fnret or return R('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $Self");
     }
-    elsif ($context eq 'group') {
-        $fnret = OVH::Bastion::is_group_owner(account => $self, group => $shortGroup, superowner => 1, sudo => $sudo);
-        $fnret or return R('ERR_NOT_ALLOWED', msg => "You're not a group owner of $shortGroup, dear $self");
+    elsif ($p{'context'} eq 'group') {
+        $fnret = OVH::Bastion::is_group_owner(account => $Self->sysUser, group => $shortGroup, superowner => 1, sudo => $p{'sudo'});
+        $fnret or return R('ERR_NOT_ALLOWED', msg => "You're not a group owner of $shortGroup, dear $Self");
     }
 
     # return untainted values
@@ -74,9 +67,10 @@ sub preconditions {
             Account    => $Account,
             shortGroup => $shortGroup,
             group      => $group,
-            size       => $size,
-            context    => $context,
-            base       => $base
+            size       => $p{'size'},
+            context    => $p{'context'},
+            base       => $base,
+            passhome   => $passhome,
         }
     );
 }
@@ -87,8 +81,8 @@ sub act {
     $fnret or return $fnret;
 
     my %values = %{$fnret->value()};
-    my ($Self, $Account, $shortGroup, $group, $size, $passhome, $base, $context, $passhome, $base) =
-      @values{qw{ Self Account shortGroup group size passhome base context passhome base }};
+    my          ( $Self,$Account,$shortGroup,$group,$size,$context,$passhome,$base) =
+      @values{qw{  Self  Account  shortGroup  group  size  context  passhome  base }};
 
     my $pass;
     my $antiloop = 1000;
@@ -126,9 +120,7 @@ sub act {
             return R('ERR_INTERNAL', msg => "Couldn't create passwords directory in group home '$passhome' ($!)");
         }
         if ($context eq 'account') {
-            if (my (undef, undef, $uid, $gid) = getpwnam($account)) {
-                chown $uid, $gid, $passhome;
-            }
+            chown $Account->uid, $Account->gid, $passhome;
         }
     }
     if (!-d $passhome) {
@@ -165,9 +157,7 @@ sub act {
         print $fdout "$pass\n";
         close($fdout);
         if ($context eq 'account') {
-            if (my (undef, undef, $uid, $gid) = getpwnam($account)) {
-                chown $uid, $gid, $base;
-            }
+            chown $Account->uid, $Account->gid, $base;
         }
         chmod 0440, $base;
     }
@@ -179,9 +169,7 @@ sub act {
         print $fdout "CREATED_BY=$Self\nBASTION_VERSION=" . $OVH::Bastion::VERSION . "\nCREATION_TIME=" . localtime() . "\nCREATION_TIMESTAMP=" . time() . "\n";
         close($fdout);
         if ($context eq 'account') {
-            if (my (undef, undef, $uid, $gid) = getpwnam($account)) {
-                chown $uid, $gid, "$base.metadata";
-            }
+            chown $Account->uid, $Account->gid, "$base.metadata";
         }
         chmod 0440, "$base.metadata";
     }
@@ -189,7 +177,7 @@ sub act {
         osh_warn "Couldn't create metadata file, proceeding anyway";
     }
 
-    return R('OK', value => {context => $context, group => $shortGroup, account => $account, hashes => $hashes});
+    return R('OK', value => {context => $context, group => $shortGroup, account => ($Account ? $Account->name : undef), hashes => $hashes});
 }
 
 1;

@@ -551,12 +551,21 @@ sub load_configuration {
         foreach my $conf (qw{ adminAccounts superOwnerAccounts }) {
             my @validAccounts;
             foreach my $account (@{$C->{$conf}}) {
-                my $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-                if (!$fnret) {
+                # to avoid a recursive loop, tell newFromName that the config is not loaded, hence it can't check
+                # for a few parameters such as the UID validity, otherwise we end up having newFromName calling the
+                # config, calling newFromName, calling the config, etc.
+                my $Account = OVH::Bastion::Account->newFromName($account);
+                if (!$Account) {
                     push @errors, "Configuration error: specified $conf '$account' is not a valid account, ignoring";
                 }
                 else {
-                    push @validAccounts, $fnret->value->{'account'};
+                    my $fnret = $Account->isExisting(ignoreConfig => 1);
+                    if (!$fnret) {
+                        push @errors, "Configuration error: specified $conf '$account' is not a valid account, ignoring";
+                    }
+                    else {
+                        push @validAccounts, $Account->name;
+                    }
                 }
             }
             $C->{$conf} = \@validAccounts;
@@ -642,86 +651,6 @@ sub config {
         return R('OK', value => $fnret->value->{$key});
     }
     return R('ERR_UNKNOWN_CONFIG_PARAMETER');
-}
-
-sub account_config {
-    my %params  = @_;
-    my $account = $params{'account'} || OVH::Bastion::get_user_from_env()->value;
-    my $key     = $params{'key'};
-    my $value   = $params{'value'};                                                 # only for setter
-    my $delete = $params{'delete'};    # if true, delete the config param entirely
-    my $public = $params{'public'};    # if true, check in /home/allowkeeper/$account instead of /home/$account
-    my $fnret;
-
-    if (my @missingParameters = grep { not defined $params{$_} } qw{ account key }) {
-        local $" = ', ';
-        return R('ERR_MISSING_PARAMETER', msg => "Missing @missingParameters on account_config() call");
-    }
-
-    if ($key !~ /^[a-zA-Z0-9_-]+$/) {
-        return R('ERR_INVALID_PARAMETER', msg => "Invalid configuration key asked ($key)");
-    }
-
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(
-        account     => $account,
-        accountType => ($account =~ /^realm_/ ? 'realm' : 'normal')
-    );
-    $fnret or return $fnret;
-
-    $account = $fnret->value->{'account'};
-    my $sysaccount    = $fnret->value->{'sysaccount'};
-    my $remoteaccount = $fnret->value->{'remoteaccount'};
-
-    my $rootdir;
-    if ($public) {
-        $rootdir = "/home/allowkeeper/$sysaccount";
-    }
-    else {
-        $rootdir = (getpwnam($sysaccount))[7];
-    }
-
-    if (!-d $rootdir) {
-        return R('ERR_DIRECTORY_NOT_FOUND', msg => "Home directory of $account ($rootdir) doesn't exist");
-    }
-    my $prefix   = $remoteaccount ? "config_$remoteaccount" : "config";
-    my $filename = "$rootdir/$prefix.$key";
-
-    if ($delete) {
-        return R('OK') if (unlink($filename));
-        return R('ERR_UNLINK_FAILED', msg => "Couldn't delete account $account config $key with public=$public ($!)");
-    }
-    elsif (defined $value) {
-
-        # setter mode
-        unlink($filename);    # remove any previous value
-        my $fh;
-        if (!sysopen($fh, $filename, O_RDWR | O_CREAT | O_EXCL))    # sysopen: avoid symlink attacks
-        {
-            return R('ERR_CANNOT_OPEN_FILE', msg => "Error while trying to open file $filename for write ($!)");
-        }
-        print $fh $value;
-        close($fh);
-        chmod 0644, $filename;
-        if ($public) {
-
-            # need to chown to allowkeeper:allowkeeper
-            my (undef, undef, $allowkeeperuid, $allowkeepergid) = getpwnam("allowkeeper");
-            chown $allowkeeperuid, $allowkeepergid, $filename;
-        }
-        return R('OK');
-    }
-    else {
-        # getter mode
-        my $fh;
-        if (!open($fh, '<', $filename)) {
-            return R('ERR_CANNOT_OPEN_FILE', msg => "Error while trying to open file $filename for read ($!)");
-        }
-        my $getvalue = do { local $/ = undef; <$fh> };
-        close($fh);
-        return R('OK', value => $getvalue);
-    }
-
-    return R('ERR_INTERNAL');    # we shouldn't be here
 }
 
 my %_plugin_config_cache;

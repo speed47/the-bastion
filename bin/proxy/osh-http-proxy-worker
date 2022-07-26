@@ -107,10 +107,10 @@ if ($monitoring) {
     exit 0;
 }
 
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);    # time: 20ms
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
 $fnret or log_and_exit(400, "Bad Request (bad account)", "Account name is invalid", {comment => "invalid_account"});
-$account               = $fnret->value->{'account'};                                  # untaint
-$log_params{'account'} = $account;
+
+$log_params{'account'} = $Account->name;
 $log_params{'user'}    = $user;
 $log_params{'hostto'}  = $remotemachine;
 $log_params{'params'}  = $path;
@@ -173,11 +173,11 @@ $log_params{'ipto'} = $remotemachine;
 
 # now check that the password we were given for account matches the hash we have stored for it
 # first get our stored hash
-$fnret = OVH::Bastion::account_config(account => $account, key => "proxyhttphash");
+$fnret = $Account->getConfig("private/proxyhttphash");
 if (not $fnret or not $fnret->value) {
 
     # bad login because we couldn't open the proper file
-    log_and_exit(403, "Access Denied", "No password configured for you, $account",
+    log_and_exit(403, "Access Denied", "No password configured for you, $Account",
         {comment => "no_password_for_login"});
 }
 my $storedhash = $fnret->value;
@@ -195,11 +195,11 @@ if ($storedhash !~ /^\$(?<cipher>[a-zA-Z0-9]{1,2})\$(?<salt>[^\$]+)\$[^\$]+$/) {
     );
 }
 
-if ($storedhash ne crypt($account . ':' . $pass, '$' . $+{'cipher'} . '$' . $+{'salt'})) {
+if ($storedhash ne crypt($Account->name . ':' . $pass, '$' . $+{'cipher'} . '$' . $+{'salt'})) {
     log_and_exit(
         403,
         "Access Denied",
-        "Incorrect username ($account) or password (#REDACTED#, length=" . length($pass) . ")",
+        "Incorrect username ($Account) or password (#REDACTED#, length=" . length($pass) . ")",
         {comment => "bad_login_password"}
     );
 }
@@ -221,7 +221,7 @@ if ($context eq 'group') {
     $authmode = 'group/explicit';
 }
 elsif ($context eq 'self') {
-    $hint     = $account;
+    $hint     = $Account->name;
     $authmode = 'self/explicit';
 }
 elsif (-f "/home/passkeeper/$user") {
@@ -235,7 +235,7 @@ elsif (OVH::Bastion::is_valid_group_and_existing(group => $user, groupType => "k
     $authmode = 'group/guessed';
 }
 else {
-    $hint     = $account;
+    $hint     = $Account->name;
     $context  = 'self';
     $authmode = 'self/default';
 }
@@ -244,7 +244,7 @@ push @{$log_params{'custom'}}, ['auth_mode'           => $authmode];
 
 # check if account or group has the right to access $user@$remotemachine, time: 50ms (to re-compute)
 $fnret = OVH::Bastion::is_access_granted(
-    account  => $account,
+    account  => $Account->name,
     user     => $user,
     ipfrom   => $ENV{'REMOTE_ADDR'},
     ip       => $remotemachine,
@@ -345,7 +345,7 @@ $req->header('X-Bastion-Auth-Mode',                 $authmode);
 $req->header('X-Bastion-Ingress-Client-IP',         $ENV{'REMOTE_ADDR'});
 $req->header('X-Bastion-Ingress-Client-Port',       $ENV{'REMOTE_PORT'});
 $req->header('X-Bastion-Ingress-Client-User-Agent', $ENV{'HTTP_USER_AGENT'});
-$req->header('X-Bastion-Ingress-Account',           $account);
+$req->header('X-Bastion-Ingress-Account',           $Account->name);
 $req->header('X-Bastion-UniqID',                    $uniqid);
 $req->header('X-Bastion-Instance',                  Sys::Hostname::hostname());
 
@@ -440,7 +440,7 @@ else {
 my $delay = Time::HiRes::tv_interval($start_time, [Time::HiRes::gettimeofday()]);
 
 # log what we got
-my $basedir = "/home/$account/ttyrec";
+my $basedir = $Account->ttyrecHome;
 -d $basedir || mkdir $basedir;
 
 my $finaldir = "$basedir/$remotemachine";
