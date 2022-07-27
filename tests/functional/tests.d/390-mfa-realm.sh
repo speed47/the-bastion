@@ -37,7 +37,7 @@ testsuite_mfa_realm()
 
     # attempt inter-realm connection
     success firstconnect1 $a4 realm_$realm_shared_account@127.0.0.1 --kbd-interactive -- $js --osh info
-    json .value.account $account4 .value.realm $realm_shared_account
+    json .value.account.name "$realm_shared_account/$account4" .value.account.realm $realm_shared_account .value.account.remote_account $account4
 
     # create a remote-group on which we'll add the realm user
     success remote_group_create $a0 --osh groupCreate --group remotegrp --owner $account0 --algo ed25519

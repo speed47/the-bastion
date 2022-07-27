@@ -165,7 +165,7 @@ osh_info(sprintf("\nI am %s, aka %s",
 $ret{'bastion'}{'hostname'} = Sys::Hostname::hostname();
 $ret{'bastion'}{'name'}     = $config->{'bastionName'};
 
-$fnret = OVH::Bastion::get_account_list();
+$fnret = OVH::Bastion::get_account_list(wantObject => 1, fast => 1);
 my $nbaccounts = $fnret ? keys %{$fnret->value} : '?';
 $fnret = OVH::Bastion::get_group_list();
 my $nbgroups = $fnret ? keys %{$fnret->value} : '?';

@@ -12,7 +12,7 @@ sub is_bastion_account_valid_and_existing { # FIXME kill me after MIGRA
     my %params = @_;
     my $A =OVH::Bastion::Account->newFromName($params{'account'}, check => 1);
     $A or return $A;
-    return R('OK', value => { account => $A->name, sysaccount=>$A->sysUser, remoteaccount=>$A->remoteName, realm =>$A->realm});
+    return R('OK', value => { account => $A->name, sysaccount=>$A->sysUser, remoteaccount=>$A->remoteName, realm =>$A->realm, home => $A->home});
 }
 
 # Check if a system user belongs to a specific system group
@@ -629,6 +629,8 @@ sub get_account_list {
     my $cache    = $params{'cache'};            # allow cache use of sys_getpw_all()
                                                 # note that is_bastion_account_valid_and_existing() passthroughs its
                                                 # $cache param to sys_getpw_name() too
+    my $wantObject = $params{'wantObject'};
+    my $fast = $params{'fast'}; # don't call ->isExisting() on each account (uid/gid will NOT be set)
 
     # we loop through all the accounts known to the OS
     my $fnret = OVH::Bastion::sys_getpw_all(cache => $cache);
@@ -640,21 +642,34 @@ sub get_account_list {
         # if $accounts has been specified, only consider those
         next if (@$accounts && !grep { $name eq $_ } @$accounts);
 
-        # skip invalid accounts.
-        # if !$cache, then we've filled the cache with sys_getpw_all() just above,
-        # so it's OK to actually use it in all cases
-        next if not OVH::Bastion::is_bastion_account_valid_and_existing(account => $name, cache => 1);
+        if (!$wantObject) {
+            # skip invalid accounts.
+            # if !$cache, then we've filled the cache with sys_getpw_all() just above,
+            # so it's OK to actually use it in all cases
+            next if not OVH::Bastion::is_bastion_account_valid_and_existing(account => $name, cache => 1);
 
-        my $entry = $fnret->value->{$name};
+            my $entry = $fnret->value->{$name};
 
-        # add proper accounts, only include a subset of the fields we got
-        $users{$name} = {
-            name  => $entry->{'name'},
-            gid   => $entry->{'gid'},
-            home  => $entry->{'dir'},
-            shell => $entry->{'shell'},
-            uid   => $entry->{'uid'}
-        };
+            # add proper accounts, only include a subset of the fields we got
+            $users{$name} = {
+                name  => $entry->{'name'},
+                gid   => $entry->{'gid'},
+                home  => $entry->{'home'},
+                shell => $entry->{'shell'},
+                uid   => $entry->{'uid'}
+            };
+        }
+        else {
+            my $Account = OVH::Bastion::Account->newFromName($name);
+            next if !$Account;
+
+            if ($fast) {
+                $users{$name} = $Account;
+            }
+            else {
+                $users{$name} = $Account if $Account->isExisting();
+            }
+        }
     }
 
     return R('OK', value => \%users);

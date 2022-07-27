@@ -31,6 +31,13 @@ $SIG{$_} = \&exit_sig for qw{ INT TERM SEGV HUP PIPE };
 # safe umask
 umask(0027);
 
+# special case when we're being called by adminSudo, under a sudo to another account from a bastion admin,
+# we unset SUDO_USER to avoid confusing the security checks of OVH::Bastion::Account
+if ($ENV{'OSH_ADMIN_SUDO_CALL'} && $ENV{'SUDO_USER'}) {
+    delete $ENV{'SUDO_USER'};
+}
+
+# instanciate $Self, which represents our caller
 my $Self = OVH::Bastion::Account->newFromEnv(type => 'incoming');
 
 # both needs to be there because in case of SIG, we need them in the handler

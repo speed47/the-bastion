@@ -61,7 +61,7 @@ if ($account) {
     $fnret = OVH::Bastion::get_account_list(accounts => [$account]);
 }
 else {
-    $fnret = OVH::Bastion::get_account_list();
+    $fnret = OVH::Bastion::get_account_list(wantObject => 1, fast => 1);
 }
 
 $fnret or osh_exit $fnret;
@@ -85,16 +85,13 @@ my $includere = OVH::Bastion::build_re_from_wildcards(wildcards => \@includes, i
 my $excludere = OVH::Bastion::build_re_from_wildcards(wildcards => \@excludes, implicit_contains => 1)->value;
 
 my $result_hash = {};
-foreach my $account (sort keys %$accounts) {
+foreach my $Account (sort keys %$accounts) {
 
     # if we have excludes, match name against the built regex
-    next if ($excludere && $account =~ $excludere);
+    next if ($excludere && $Account->name =~ $excludere);
 
     # same for includes
-    next if ($includere && $account !~ $includere);
-
-    my $Account = OVH::Bastion::Account->newFromName($account);
-    $Account or next;
+    next if ($includere && $Account->name !~ $includere);
 
     $Account->isExisting() or next;
 

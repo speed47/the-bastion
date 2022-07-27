@@ -271,7 +271,7 @@ sub setConfig {
 
     # be nice and delete the cache of getConfig
     if (delete $CACHE{refaddr($this)."!getConfig!$compositeKey"}) {
-        osh_debug("Account::setConfig($this): successfully deleted getConfig cache for $compositeKey");
+        OVH::Bastion::osh_debug("Account::setConfig($this): successfully deleted getConfig cache for $compositeKey");
     }
 
     unlink($filename);    # remove any previous value
@@ -644,7 +644,7 @@ sub selfCheck {
     if ($ENV{'SUDO_USER'}) {
         if ($this->sysUser ne $ENV{'SUDO_USER'}) {
             OVH::Bastion::warn_syslog(sprintf(
-                "Mismatching SUDO8USER envvar '%s' while checking account '%s' with sysUser '%s'",
+                "Mismatching SUDO_USER envvar '%s' while checking account '%s' with sysUser '%s'",
                 $ENV{'SUDO_USER'}, $this->name, $this->sysUser
             ));
             return R('KO_INVALID_ACCOUNT', msg => "Your SUDO_USER envvar doesn't match your system account $ENV{'SUDO_USER'} and ".$this->sysUser); # FIXME remove the verbose MIGRA

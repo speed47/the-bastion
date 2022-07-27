@@ -12,7 +12,7 @@ sub preconditions {
     my %p = @_;
     my $fnret = OVH::Bastion::check_args(\%p,
         mandatory => [qw{ Self size context }],
-        optionalFalseOk => [qw{ group account sudo }],
+        optionalFalseOk => [qw{ group account Account sudo }], # MIGRA FIXME object
     );
     $fnret or return $fnret;
 
@@ -30,11 +30,20 @@ sub preconditions {
         $base       = "$passhome/$shortGroup";
     }
     elsif ($p{'context'} eq 'account') {
-        if (not $p{'account'}) {
-            return R('ERR_MISSING_PARAMETER', msg => "Missing argument 'account'");
+        if (!$p{'Account'}) {
+            if (!$p{'account'}) {
+                return R('ERR_MISSING_PARAMETER', msg => "Missing argument 'account'");
+            }
+            $Account = OVH::Bastion::Account->newFromName($p{'account'});
+            $Account or return $Account;
         }
-        $Account = OVH::Bastion::Account->newFromName($p{'account'}, check => 1);
-        $Account or return $Account;
+        else {
+            $Account = $p{'Account'};
+        }
+
+        $fnret = $Account->check();
+        $fnret or return $fnret;
+
         $passhome = $Account->passHome;
         $base     = "$passhome/".$Account->sysUser;
     }

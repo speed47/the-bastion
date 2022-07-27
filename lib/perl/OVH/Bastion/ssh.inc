@@ -844,7 +844,7 @@ sub ssh_ingress_keys_piv_apply {
     $fnret or return $fnret;
 
     $account = $fnret->value->{'account'};
-    my $dir = $fnret->value->{'dir'};
+    my $dir = $fnret->value->{'home'};
 
     $fnret = OVH::Bastion::get_authorized_keys_from_file(
         account            => $account,

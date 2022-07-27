@@ -108,7 +108,8 @@ if ($monitoring) {
 }
 
 my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
-$fnret or log_and_exit(400, "Bad Request (bad account)", "Account name is invalid", {comment => "invalid_account"});
+$Account or log_and_exit(400, "Bad Request (bad account)",
+    "Account name '$account' is invalid (".$Account->msg.")", {comment => "invalid_account"});
 
 $log_params{'account'} = $Account->name;
 $log_params{'user'}    = $user;

@@ -47,7 +47,7 @@ if (!$account || !$policy || !$step) {
 
 #>PARAMS:ACCOUNT
 osh_debug("Checking account");
-my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1); # FIXME type=>local?
 $Account or HEXIT($Account);
 #<PARAMS:ACCOUNT
 

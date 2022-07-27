@@ -418,7 +418,8 @@ sub process_http_request {
     }
     undef $user_expression;    # no longer needed
 
-    if (not OVH::Bastion::is_account_valid(account => $account)) {
+    my $Account = OVH::Bastion::Account->newFromName($account);
+    if (!$Account) {
         return $self->log_and_exit(
             400,
             "Bad Request (bad account)",
@@ -426,7 +427,7 @@ sub process_http_request {
             {comment => "invalid_account"}
         );
     }
-    my $escaped_account = $account;
+    my $escaped_account = $Account->name;
     $escaped_account =~ s/%/%%/g;
     $self->{'server'}{'access_log_format'} =
       qq#%h $escaped_account %u %t "%r" %>s %b "$remotemachine" "$ENV{'UNIQID'}" "%{User-Agent}i" %D -#;
@@ -439,19 +440,18 @@ sub process_http_request {
         );
     }
 
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
+    $fnret = $Account->check();
     if (not $fnret) {
 
         # don't be too specific on the error message to avoid account name guessing
         return $self->log_and_exit(
             403,
             "Access Denied",
-            "Incorrect username ($account) or password (#REDACTED#, length=" . length($pass) . ")",
+            "Incorrect username ($Account) or password (#REDACTED#, length=" . length($pass) . ")",
             {comment => "invalid_credentials"}
         );
     }
-    $account = $fnret->value->{'account'};    # untaint
-    $self->{'_log'}{'account'} = $account;
+    $self->{'_log'}{'account'} = $Account->name;
 
     if ($user !~ /^[a-zA-Z0-9._-]+/) {
         return $self->log_and_exit(
@@ -518,9 +518,9 @@ sub process_http_request {
     }
 
     # here, we know the account is right, so we sudo to this account to proceed
-    my @cmd = ("sudo", "-n", "-u", $account, "--", "/usr/bin/env", "perl", "-T",
+    my @cmd = ("sudo", "-n", "-u", $Account->sysUser, "--", "/usr/bin/env", "perl", "-T",
         "/opt/bastion/bin/proxy/osh-http-proxy-worker");
-    push @cmd, "--account", $account, "--context", $context, "--user", $user, "--host", $remotemachine, "--uniqid",
+    push @cmd, "--account", $Account->name, "--context", $context, "--user", $user, "--host", $remotemachine, "--uniqid",
       $ENV{'UNIQID'};
     push @cmd, "--method", $self->{'request_info'}{'request_method'}, "--path", $self->{'request_info'}{'request_path'};
     push @cmd, "--port", $remoteport;

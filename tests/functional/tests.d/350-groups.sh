@@ -62,7 +62,7 @@ testsuite_groups()
 
     success a2_can_access_the_bastion $a2 --osh info
     contain "Your alias to connect"
-    json .command info .error_code OK .value.account $account2
+    json .command info .error_code OK .value.account.name $account2
 
     # now create a3 directly, we'll need it to test groups
     script a0_create_a3 $a0 --osh accountCreate --always-active --account $account3 --uid $uid3 \< $account3key1file.pub
@@ -75,7 +75,7 @@ testsuite_groups()
 
     success a3_can_access_the_bastion $a3 --osh info
     contain "Your alias to connect"
-    json .command info .error_code OK .value.account $account3
+    json .command info .error_code OK .value.account.name $account3
 
     revoke accountCreate
 
@@ -1073,9 +1073,9 @@ EOS
     .value.owners[1]   null
     .value.gatekeepers[0]   $account2
     .value.gatekeepers[1]   null
-    .value.full_members[0]   $account2
-    .value.full_members[1]   null
-    .value.partial_members[0]   null
+    .value.members[0]   $account2
+    .value.members[1]   null
+    .value.guests[0]   null
     .value.keys|.["$tmpfp"]|.family      ECDSA
     .value.keys|.["$tmpfp"]|.size        521
     .value.keys|.["$tmpfp"]|.fingerprint $tmpfp
@@ -1107,8 +1107,8 @@ EOS
     .value.owners[1]   null
     .value.gatekeepers[0]   $account1
     .value.gatekeepers[1]   null
-    .value.full_members[0]   null
-    .value.partial_members[0]   null
+    .value.members[0]   null
+    .value.guests[0]   null
     .value.keys|.["$tmpfp"]|.family      RSA
     .value.keys|.["$tmpfp"]|.size        4096
     .value.keys|.["$tmpfp"]|.fingerprint $tmpfp
@@ -1134,8 +1134,8 @@ EOS
     .value.gatekeepers[0]   $account1
     .value.gatekeepers[1]   $account2
     .value.gatekeepers[2]   null
-    .value.full_members[0]  null
-    .value.partial_members[0]   null
+    .value.members[0]  null
+    .value.guests[0]   null
     .value.keys|.["$tmpfp"]|.family      RSA
     .value.keys|.["$tmpfp"]|.size        4096
     .value.keys|.["$tmpfp"]|.fingerprint $tmpfp
@@ -1160,8 +1160,8 @@ EOS
     .value.owners[1]    null
     .value.gatekeepers[0]   $account2
     .value.gatekeepers[1]   null
-    .value.full_members[0]  null
-    .value.partial_members[0]   null
+    .value.members[0]  null
+    .value.guests[0]   null
     .value.keys|.["$tmpfp"]|.family      RSA
     .value.keys|.["$tmpfp"]|.size        4096
     .value.keys|.["$tmpfp"]|.fingerprint $tmpfp
