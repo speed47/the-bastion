@@ -25,19 +25,16 @@ Note that if doesn't remove the TOTP requirement, if set (see ``accountModify`` 
 EOF
 );
 
-my $fnret;
-
 if (not $account) {
     help();
     osh_exit 'ERR_MISSING_PARAMETER', "Expected an --account argument";
 }
 
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret or osh_exit $fnret;
-$account = $fnret->value->{'account'};
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or osh_exit($Account);
 
 my @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountMFAResetTOTP';
-push @command, "--account", $account;
+push @command, "--account", $Account->name;
 
 osh_exit(OVH::Bastion::helper(cmd => \@command));

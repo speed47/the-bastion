@@ -28,10 +28,10 @@ if (!$pRealm) {
     osh_exit R('ERR_MISSING_PARAMETER', msg => "Missing argument 'realm'");
 }
 
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => "realm_$pRealm", accountType => "realm");
-$fnret or osh_exit $fnret;
+my $RealmSupportAccount = OVH::Bastion::Account->newFromName("realm_$pRealm", type => "realm", check => 1);
+$RealmSupportAccount or osh_exit($RealmSupportAccount);
 
-$fnret = OVH::Bastion::get_remote_accounts_from_realm(realm => $pRealm);
+$fnret = OVH::Bastion::get_remote_accounts_from_realm(realm => $RealmSupportAccount->realm);
 $fnret or osh_exit $fnret;
 
 my @accounts = sort @{$fnret->value};
@@ -40,15 +40,17 @@ my %details;
 if (@accounts) {
     osh_info "The following accounts from realm $pRealm are known:";
     foreach my $account (@accounts) {
-        $fnret = OVH::Bastion::get_acls(account => "$pRealm/$account");
+        $fnret = OVH::Bastion::get_acls(account => sprintf("%s/%s", $RealmSupportAccount->realm, $account));
         my $nb = $fnret ? scalar(@{$fnret->value}) : "?";
         $details{$account} = {accesses => ($fnret ? scalar(@{$fnret->value}) : undef)};
         osh_info sprintf("- %-18s [%s accesses]", $account, $nb);
     }
-    osh_info "\nTo get their access list, use --osh accountListAccesses --account $pRealm/account_name_here";
+    osh_info("\nTo get their access list, use --osh accountListAccesses --account "
+          . $RealmSupportAccount->realm
+          . "/account_name_here");
 }
 else {
-    osh_info "No remote accounts from realm $pRealm have accesses yet.";
+    osh_info("No remote accounts from realm " . $RealmSupportAccount->realm . " have accesses yet.");
 }
 
-osh_ok({realm => $pRealm, accounts => \@accounts, account_details => \%details});
+osh_ok({realm => $RealmSupportAccount->realm, accounts => \@accounts, account_details => \%details});

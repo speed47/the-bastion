@@ -8,9 +8,6 @@ use OVH::Result;
 use OVH::Bastion;
 use OVH::Bastion::Plugin qw( :DEFAULT help );
 
-# globally allow sys_getpw* and sys_getgr* cache use
-$ENV{'PW_GR_CACHE'} = 1;
-
 my $remainingOptions = OVH::Bastion::Plugin::begin(
     argv    => \@ARGV,
     header  => "list of servers pertaining to the group",
@@ -53,9 +50,9 @@ $fnret or osh_exit $fnret;
 $group = $fnret->value->{'group'};
 my $shortGroup = $fnret->value->{'shortGroup'};
 
-if (       !OVH::Bastion::is_group_member(group => $shortGroup, account => $Self->name)
-        && !OVH::Bastion::is_group_aclkeeper(group => $shortGroup, account => $Self->name, superowner => 1)
-        && !$Self->isAuditor)
+if (   !OVH::Bastion::is_group_member(group => $shortGroup, account => $Self->name)
+    && !OVH::Bastion::is_group_aclkeeper(group => $shortGroup, account => $Self->name, superowner => 1)
+    && !$Self->isAuditor)
 {
     osh_exit(
         R(

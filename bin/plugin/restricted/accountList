@@ -9,9 +9,6 @@ use OVH::Result;
 use OVH::Bastion;
 use OVH::Bastion::Plugin qw( :DEFAULT help );
 
-# globally allow sys_getpw* and sys_getgr* cache use
-$ENV{'PW_GR_CACHE'} = 1;
-
 my $remainingOptions = OVH::Bastion::Plugin::begin(
     argv    => \@ARGV,
     header  => "list bastion accounts",
@@ -58,10 +55,10 @@ if ($realmOnly) {
 
 my $fnret;
 if ($account) {
-    $fnret = OVH::Bastion::get_account_list(accounts => [$account]);
+    $fnret = OVH::Bastion::get_account_list(accounts => [$account], fast => 1);
 }
 else {
-    $fnret = OVH::Bastion::get_account_list(wantObject => 1, fast => 1);
+    $fnret = OVH::Bastion::get_account_list(fast => 1);
 }
 
 $fnret or osh_exit $fnret;
@@ -73,7 +70,6 @@ if ($audit && !$Self->isAuditor) {
 
 my $fnretPassword;
 if ($audit) {
-
     # get UNIX password info for all accounts
     my @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
     push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountGetPasswordInfo', '--all';
@@ -85,14 +81,15 @@ my $includere = OVH::Bastion::build_re_from_wildcards(wildcards => \@includes, i
 my $excludere = OVH::Bastion::build_re_from_wildcards(wildcards => \@excludes, implicit_contains => 1)->value;
 
 my $result_hash = {};
-foreach my $Account (sort keys %$accounts) {
+foreach my $accountName (sort keys %$accounts) {
 
     # if we have excludes, match name against the built regex
-    next if ($excludere && $Account->name =~ $excludere);
+    next if ($excludere && $accountName =~ $excludere);
 
     # same for includes
-    next if ($includere && $Account->name !~ $includere);
+    next if ($includere && $accountName !~ $includere);
 
+    my $Account = $accounts->{$accountName};
     $Account->isExisting() or next;
 
     my %states;

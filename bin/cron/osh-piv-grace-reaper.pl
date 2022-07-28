@@ -58,15 +58,15 @@ if (!$config->{'enabled'}) {
 _log "Looking for accounts with a PIV grace...";
 
 # loop through all the accounts, and only work on those that have a grace period set
-$fnret = OVH::Bastion::get_account_list(wantObject => 1);
+$fnret = OVH::Bastion::get_account_list();
 if (!$fnret) {
     _err "Couldn't get account list: " . $fnret->msg;
     exit 1;
 }
 else {
-    _log "Found ".(scalar keys %{$fnret->value})." accounts";
+    _log "Found " . (scalar keys %{$fnret->value}) . " accounts";
 }
-my %accounts = %{ $fnret->value };
+my %accounts = %{$fnret->value};
 foreach my $accountName (sort keys %accounts) {
     my $Account = $accounts{$accountName};
     $Account->check() or next;

@@ -74,6 +74,7 @@ if (defined $ttl) {
     $ttl = $fnret->value->{'seconds'};
 }
 
+osh_warn("FIXME MIGRA user$user userAny$userAny");
 my $realUser = $user;
 $realUser = '!scpupload'   if $scpUp;
 $realUser = '!scpdownload' if $scpDown;
@@ -89,7 +90,7 @@ my $fnret = OVH::Bastion::Plugin::groupSetRole::act(
     host           => ($ip || $host),
     ttl            => $ttl,
     comment        => $comment,
-    sudo           => 0,
+    isHelper       => 0,
     silentoverride => 0,
     Self           => $Self,
     scriptName     => $scriptName,

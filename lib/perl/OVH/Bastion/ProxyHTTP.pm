@@ -518,9 +518,12 @@ sub process_http_request {
     }
 
     # here, we know the account is right, so we sudo to this account to proceed
-    my @cmd = ("sudo", "-n", "-u", $Account->sysUser, "--", "/usr/bin/env", "perl", "-T",
-        "/opt/bastion/bin/proxy/osh-http-proxy-worker");
-    push @cmd, "--account", $Account->name, "--context", $context, "--user", $user, "--host", $remotemachine, "--uniqid",
+    my @cmd = (
+        "sudo", "-n", "-u", $Account->sysUser, "--", "/usr/bin/env", "perl", "-T",
+        "/opt/bastion/bin/proxy/osh-http-proxy-worker"
+    );
+    push @cmd, "--account", $Account->name, "--context", $context, "--user", $user, "--host", $remotemachine,
+      "--uniqid",
       $ENV{'UNIQID'};
     push @cmd, "--method", $self->{'request_info'}{'request_method'}, "--path", $self->{'request_info'}{'request_path'};
     push @cmd, "--port", $remoteport;

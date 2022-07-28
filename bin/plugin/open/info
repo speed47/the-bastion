@@ -10,9 +10,6 @@ use OVH::Result;
 use OVH::Bastion;
 use OVH::Bastion::Plugin qw( :DEFAULT help );
 
-# globally allow sys_getpw* and sys_getgr* cache use
-$ENV{'PW_GR_CACHE'} = 1;
-
 my ($name);
 OVH::Bastion::Plugin::begin(
     argv     => \@ARGV,
@@ -32,9 +29,9 @@ my $config = $fnret->value;
 my %ret;
 
 $ret{'account'} = {
-    name => $Self->name,
+    name           => $Self->name,
     remote_account => $Self->remoteName,
-    realm => $Self->realm
+    realm          => $Self->realm
 };
 osh_info "You are " . colored($Self->remoteName || $Self->name, 'green');
 
@@ -63,7 +60,7 @@ if (!$Self->realm) {
     my $bastionCommand = OVH::Bastion::config('bastionCommand')->value();
     $bastionCommand =~ s/USER|ACCOUNT/$Self->name/ge;
 
-    my $bastionName    = OVH::Bastion::config('bastionName')->value();
+    my $bastionName = OVH::Bastion::config('bastionName')->value();
     $bastionCommand =~ s/CACHENAME|BASTIONNAME/$bastionName/g;
 
     my $hostname = Sys::Hostname::hostname();
@@ -86,11 +83,17 @@ if (!$Self->realm) {
 osh_info "\nMulti-Factor Authentication (MFA) on your account:";
 $ret{'mfa'}{'password'} = {
     required => OVH::Bastion::is_user_in_group(
-        user => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_REQUIRED_GROUP)->toJsonBool(),
+        user  => $Self->sysUser,
+        group => OVH::Bastion::MFA_PASSWORD_REQUIRED_GROUP
+    )->toJsonBool(),
     bypass => OVH::Bastion::is_user_in_group(
-        user => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP)->toJsonBool(),
+        user  => $Self->sysUser,
+        group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP
+    )->toJsonBool(),
     configured => OVH::Bastion::is_user_in_group(
-        user => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_CONFIGURED_GROUP)->toJsonBool(),
+        user  => $Self->sysUser,
+        group => OVH::Bastion::MFA_PASSWORD_CONFIGURED_GROUP
+    )->toJsonBool(),
 };
 
 osh_info "- Additional password authentication is "
@@ -101,12 +104,18 @@ osh_info "- Additional password authentication is "
   . ($ret{'mfa'}{'password'}{'configured'} ? colored('enabled and active', 'green') : colored('disabled', 'blue'));
 
 $ret{'mfa'}{'totp'} = {
-  required => OVH::Bastion::is_user_in_group(
-        user => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP)->toJsonBool(),
-  bypass => OVH::Bastion::is_user_in_group(
-        user => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP)->toJsonBool(),
-  configured => OVH::Bastion::is_user_in_group(
-        user => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP)->toJsonBool(),
+    required => OVH::Bastion::is_user_in_group(
+        user  => $Self->sysUser,
+        group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP
+    )->toJsonBool(),
+    bypass => OVH::Bastion::is_user_in_group(
+        user  => $Self->sysUser,
+        group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP
+    )->toJsonBool(),
+    configured => OVH::Bastion::is_user_in_group(
+        user  => $Self->sysUser,
+        group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP
+    )->toJsonBool(),
 };
 
 osh_info "- Additional TOTP authentication is "
@@ -120,12 +129,11 @@ $fnret = OVH::Bastion::sys_getpasswordinfo(user => $Self->sysUser);
 if ($fnret) {
     $ret{'account'}{'password'}{$_} = $fnret->value->{$_} for (keys %{$fnret->value});
     osh_info "\nAccount PAM UNIX password information (used for password MFA):";
-    osh_info("- Password is "
-        . $ret{'account'}{'password'}{'password'} eq 'locked'
-        ? colored('unused', 'blue')
+    osh_info(
+        "- Password is "
+          . $ret{'account'}{'password'}{'password'} eq 'locked' ? colored('unused', 'blue')
         : (
-            $ret{'account'}{'password'}{'password'} eq 'set'
-            ? colored('set', 'green')
+            $ret{'account'}{'password'}{'password'} eq 'set' ? colored('set', 'green')
             : colored($ret{'account'}{'password'}{'password'}, 'red')
         )
     );
@@ -158,14 +166,17 @@ if ($fnret) {
     }
 }
 
-osh_info(sprintf("\nI am %s, aka %s",
-    colored(Sys::Hostname::hostname(), 'green'),
-    colored($config->{'bastionName'}, 'green')
-));
+osh_info(
+    sprintf(
+        "\nI am %s, aka %s",
+        colored(Sys::Hostname::hostname(), 'green'),
+        colored($config->{'bastionName'},  'green')
+    )
+);
 $ret{'bastion'}{'hostname'} = Sys::Hostname::hostname();
 $ret{'bastion'}{'name'}     = $config->{'bastionName'};
 
-$fnret = OVH::Bastion::get_account_list(wantObject => 1, fast => 1);
+$fnret = OVH::Bastion::get_account_list(fast => 1);
 my $nbaccounts = $fnret ? keys %{$fnret->value} : '?';
 $fnret = OVH::Bastion::get_group_list();
 my $nbgroups = $fnret ? keys %{$fnret->value} : '?';
@@ -236,7 +247,7 @@ if ($config->{'accountMaxInactiveDays'}) {
 else {
     osh_info "- Account expiration is " . colored('DISABLED', 'red');
 }
-$ret{'configuration'}{'account_expiration_days'} = $config->{'accountMaxInactiveDays'}+0;
+$ret{'configuration'}{'account_expiration_days'} = $config->{'accountMaxInactiveDays'} + 0;
 
 if ($config->{'idleLockTimeout'}) {
     osh_info "- Keyboard input idle time for session locking is "
@@ -248,7 +259,7 @@ if ($config->{'idleLockTimeout'}) {
 else {
     osh_info "- Keyboard input idle time for session locking is " . colored('DISABLED', 'red');
 }
-$ret{'configuration'}{'idle_lock_timeout'} = $config->{'idleLockTimeout'}+0;
+$ret{'configuration'}{'idle_lock_timeout'} = $config->{'idleLockTimeout'} + 0;
 
 if ($config->{'idleKillTimeout'}) {
     osh_info "- Keyboard input idle time for session killing is "
@@ -260,7 +271,7 @@ if ($config->{'idleKillTimeout'}) {
 else {
     osh_info "- Keyboard input idle time for session killing is " . colored('DISABLED', 'red');
 }
-$ret{'configuration'}{'idle_kill_timeout'} = $config->{'idleKillTimeout'}+0;
+$ret{'configuration'}{'idle_kill_timeout'} = $config->{'idleKillTimeout'} + 0;
 
 $fnret = OVH::Bastion::get_from_for_user_key();
 if ($fnret && $fnret->value->{'from'}) {
@@ -286,8 +297,8 @@ foreach my $way (qw{ ingress egress }) {
         osh_info "- The RSA key size for $way SSH keys must be between "
           . colored($config->{"minimum" . ucfirst($way) . "RsaKeySize"}, "magenta") . " and "
           . colored($config->{"maximum" . ucfirst($way) . "RsaKeySize"}, "magenta") . " bits";
-        $ret{'configuration'}{$way}{'rsa_min_size'} = $config->{"minimum" . ucfirst($way) . "RsaKeySize"}+0;
-        $ret{'configuration'}{$way}{'rsa_max_size'} = $config->{"maximum" . ucfirst($way) . "RsaKeySize"}+0;
+        $ret{'configuration'}{$way}{'rsa_min_size'} = $config->{"minimum" . ucfirst($way) . "RsaKeySize"} + 0;
+        $ret{'configuration'}{$way}{'rsa_max_size'} = $config->{"maximum" . ucfirst($way) . "RsaKeySize"} + 0;
     }
 }
 osh_info "- The Multi-Factor Authentication (MFA) policy is "
@@ -301,7 +312,7 @@ if ($Self->isAdmin) {
     $fnret = OVH::Bastion::sysinfo();
     if ($fnret and $fnret->value) {
         osh_info "We're running under " . $fnret->value->{'system'} . " " . $fnret->value->{'release'};
-        $ret{'system'}{'os'}  = $fnret->value->{'system'};
+        $ret{'system'}{'os'}      = $fnret->value->{'system'};
         $ret{'system'}{'release'} = $fnret->value->{'release'};
     }
 

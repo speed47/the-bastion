@@ -2,24 +2,51 @@
 package OVH::Bastion;
 
 use common::sense;
+use Memoize;
+use Hash::Util qw{ unlock_hashref_recurse };
+
+# use our own cache facility, as we need to have fine control about
+# cache invalidation, and this also make it possible for sibling funcs
+# to share the same cache
+my %_pw_cache;
+my $_pw_all_cached = 0;
+my %_gr_cache;
+my $_gr_all_cached = 0;
+
+sub _clear_cache {
+    my $category = shift;
+    OVH::Bastion::osh_warn(
+        "clear_cache $category, got " . (scalar keys %_pw_cache) . " pw and " . (scalar keys %_gr_cache) . " gr");
+
+    # as we're caching functions that usually return OVH::Result objects, and those
+    # objects are locked, we get yelled at if we try to empty the cache hashes
+    # without unlocking everything first
+    if ($category eq 'users') {
+        unlock_hashref_recurse(\%_pw_cache);
+        %_pw_cache      = ();
+        $_pw_all_cached = 0;
+    }
+    elsif ($category eq 'groups') {
+        unlock_hashref_recurse(\%_gr_cache);
+        %_gr_cache      = ();
+        $_gr_all_cached = 0;
+    }
+    return 1;
+}
+
+memoize('sysinfo');
 
 sub sysinfo {
-    state $cached_response;
-    if (not defined $cached_response) {
-        my $fnret = OVH::Bastion::execute(cmd => [qw{ uname -sr }]);
+    my $fnret = OVH::Bastion::execute(cmd => [qw{ uname -sr }]);
 
-        if ($fnret and $fnret->value and $fnret->value->{'stdout'}) {
-            my ($system, $release) = split(/ /, $fnret->value->{'stdout'}->[0]);
-            my $flavor = 'unknown';
-            $flavor = 'debian' if -f "/etc/debian_version";
-            $flavor = 'redhat' if -f "/etc/redhat-release";
-            $cached_response = R('OK', value => {system => $system, release => $release, flavor => $flavor});
-        }
-        else {
-            $cached_response = R('OK', value => {system => 'unknown', release => 'unknown', flavor => 'unknown'});
-        }
+    if ($fnret and $fnret->value and $fnret->value->{'stdout'}) {
+        my ($system, $release) = split(/ /, $fnret->value->{'stdout'}->[0]);
+        my $flavor = 'unknown';
+        $flavor = 'debian' if -f "/etc/debian_version";
+        $flavor = 'redhat' if -f "/etc/redhat-release";
+        return R('OK', value => {system => $system, release => $release, flavor => $flavor});
     }
-    return $cached_response;
+    return R('OK', value => {system => 'unknown', release => 'unknown', flavor => 'unknown'});
 }
 
 sub is_linux { return R($^O eq 'linux' ? 'OK' : 'KO'); }
@@ -86,28 +113,36 @@ sub _sys_autoretry {
 }
 
 sub sys_useradd {
-    my %params = @_;
-    my $user   = delete $params{'user'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory       => [qw{ user }],
+        optional        => [qw{ uid gid home noisy_stderr }],
+        optionalFalseOk => [qw{ comment shell }],
+    );
+    $fnret or return $fnret;
+
+    my $user = delete $p{'user'};
 
     if (not $user) {
         return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory parameter 'user'");
     }
 
     my @cmd;
-    if (exists $params{'uid'}) {
-        push @cmd, ('-u', delete $params{'uid'});
+    if (exists $p{'uid'}) {
+        push @cmd, ('-u', delete $p{'uid'});
     }
-    if (exists $params{'gid'}) {
-        push @cmd, ('-g', delete $params{'gid'});
+    if (exists $p{'gid'}) {
+        push @cmd, ('-g', delete $p{'gid'});
     }
-    if (exists $params{'home'}) {
-        push @cmd, ('-d', delete $params{'home'});
+    if (exists $p{'home'}) {
+        push @cmd, ('-d', delete $p{'home'});
     }
-    if (exists $params{'comment'}) {
-        push @cmd, ('-c', delete $params{'comment'});
+    if (exists $p{'comment'}) {
+        push @cmd, ('-c', delete $p{'comment'});
     }
-    if (exists $params{'shell'}) {
-        my $shell = delete $params{'shell'};
+    if (exists $p{'shell'}) {
+        my $shell = delete $p{'shell'};
         if (not defined $shell) {
 
             # we want a shell that exists and prevents login
@@ -135,22 +170,34 @@ sub sys_useradd {
         @cmd = ('useradd', '-p', '*', '-m', @cmd, $user);
     }
 
-    $params{'cmd'}          = \@cmd;
-    $params{'must_succeed'} = 1;
-    return _sys_autoretry(%params);
+    # we're adding a user, clear cache
+    _clear_cache('users');
+    # adding a user also create their primary group
+    _clear_cache('groups');
+
+    $p{'cmd'}          = \@cmd;
+    $p{'must_succeed'} = 1;
+    return _sys_autoretry(%p);
 }
 
 sub sys_groupadd {
-    my %params = @_;
-    my $group  = delete $params{'group'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory => [qw{ group }],
+        optional  => [qw{ gid noisy_stderr }],
+    );
+    $fnret or return $fnret;
+
+    my $group = delete $p{'group'};
 
     if (not $group) {
         return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory parameter 'group'");
     }
 
     my @cmd;
-    if ($params{'gid'}) {
-        push @cmd, ('-g', delete $params{'gid'});
+    if ($p{'gid'}) {
+        push @cmd, ('-g', delete $p{'gid'});
     }
 
     if (is_freebsd()) {
@@ -160,14 +207,24 @@ sub sys_groupadd {
         @cmd = ('groupadd', @cmd, $group);
     }
 
-    $params{'cmd'}          = \@cmd;
-    $params{'must_succeed'} = 1;
-    return _sys_autoretry(%params);
+    # we're adding a group, clear cache
+    _clear_cache('groups');
+
+    $p{'cmd'}          = \@cmd;
+    $p{'must_succeed'} = 1;
+    return _sys_autoretry(%p);
 }
 
 sub sys_userdel {
-    my %params = @_;
-    my $user   = delete $params{'user'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory => [qw{ user }],
+        optional  => [qw{ noisy_stderr }],
+    );
+    $fnret or return $fnret;
+
+    my $user = delete $p{'user'};
 
     if (not $user) {
         return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory parameter 'user'");
@@ -181,8 +238,8 @@ sub sys_userdel {
 
         # main user group is never auto-removed, so we'll do it but only
         # if the name of the user is the same than the name of its primary group
-        my ($fnret, $maingroup);
-        $fnret = OVH::Bastion::execute(cmd => ['id', '-g', '-n', $user], %params);
+        my $maingroup;
+        $fnret = OVH::Bastion::execute(cmd => ['id', '-g', '-n', $user], %p);
         if ($fnret->err eq 'OK' and $fnret->value and $fnret->value->{'stdout'}) {
             $maingroup = $fnret->value->{'stdout'}->[0];
         }
@@ -190,7 +247,7 @@ sub sys_userdel {
         if (defined $maingroup && $user eq $maingroup) {
 
             # okay, maingroup == user, so delete the user first, then the corresponding group
-            $fnret = OVH::Bastion::execute(cmd => ['userdel', $user], %params);
+            $fnret = OVH::Bastion::execute(cmd => ['userdel', $user], %p);
             if ($fnret->err eq 'OK') {
                 @cmd = ('groupdel', $user);
             }
@@ -205,14 +262,26 @@ sub sys_userdel {
         @cmd = ('userdel', $user);
     }
 
-    $params{'cmd'}          = \@cmd;
-    $params{'must_succeed'} = 1;
-    return _sys_autoretry(%params);
+    # we're removing a user, clear cache
+    _clear_cache('users');
+    # removing a user also removes their primary group
+    _clear_cache('groups');
+
+    $p{'cmd'}          = \@cmd;
+    $p{'must_succeed'} = 1;
+    return _sys_autoretry(%p);
 }
 
 sub sys_groupdel {
-    my %params = @_;
-    my $group  = delete $params{'group'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory => [qw{ group }],
+        optional  => [qw{ noisy_stderr }],
+    );
+    $fnret or return $fnret;
+
+    my $group = delete $p{'group'};
 
     if (not $group) {
         return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory parameter 'group'");
@@ -220,28 +289,38 @@ sub sys_groupdel {
 
     my @cmd;
     if (is_freebsd()) {
-        @cmd = ('pw', 'groupdel', '-n', $group,);
+        @cmd = ('pw', 'groupdel', '-n', $group);
     }
     else {
         @cmd = ('groupdel', $group);
     }
 
-    $params{'cmd'}          = \@cmd;
-    $params{'must_succeed'} = 1;
-    return _sys_autoretry(%params);
+    # we're removing a group, clear cache
+    _clear_cache('groups');
+
+    $p{'cmd'}          = \@cmd;
+    $p{'must_succeed'} = 1;
+    return _sys_autoretry(%p);
 }
 
 sub sys_addmembertogroup {
-    my %params = @_;
-    my $user   = delete $params{'user'};
-    my $group  = delete $params{'group'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory => [qw{ user group }],
+        optional  => [qw{ noisy_stderr }],
+    );
+    $fnret or return $fnret;
+
+    my $user  = delete $p{'user'};
+    my $group = delete $p{'group'};
 
     if (not $group or not $user) {
         return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory parameter 'group' or 'user'");
     }
 
     if (is_openbsd() || is_netbsd()) {
-        my $fnret  = OVH::Bastion::execute(cmd => ["groups", $user], must_succeed => 1);
+        $fnret = OVH::Bastion::execute(cmd => ["groups", $user], must_succeed => 1);
         my @stdout = @{$fnret->value->{'stdout'} || []};
         my @cur    = split(/ /, $stdout[0]);
         return R('ERR_SYSTEM_LIMIT_REACHED') if @cur >= 16;
@@ -258,22 +337,28 @@ sub sys_addmembertogroup {
         @cmd = ('usermod', '-a', '-G', $group, $user);
     }
 
-    $params{'cmd'}          = \@cmd;
-    $params{'must_succeed'} = 1;
-    return _sys_autoretry(%params);
+    # we're adding a user to a group, clear the group cache
+    _clear_cache('groups');
+
+    $p{'cmd'}          = \@cmd;
+    $p{'must_succeed'} = 1;
+    return _sys_autoretry(%p);
 }
 
 sub sys_delmemberfromgroup {
-    my %params = @_;
-    my $user   = delete $params{'user'};
-    my $group  = delete $params{'group'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory => [qw{ user group }],
+        optional  => [qw{ noisy_stderr }],
+    );
+    $fnret or return $fnret;
 
-    if (not $group or not $user) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory parameter 'group' or 'user'");
-    }
+    my $user  = delete $p{'user'};
+    my $group = delete $p{'group'};
 
     my @cmd;
-    delete $params{'cmd'};    # security
+    delete $p{'cmd'};    # security
     if (is_freebsd()) {
         @cmd = ('pw', 'groupmod', '-n', $group, '-d', $user);
     }
@@ -284,7 +369,7 @@ sub sys_delmemberfromgroup {
 
         # geez. those guys are complicated.
         # first get the list of all groups user is a member of
-        my $fnret = OVH::Bastion::execute(cmd => ['id', '-G', '-n', $user], %params);
+        $fnret = OVH::Bastion::execute(cmd => ['id', '-G', '-n', $user], %p);
         if ($fnret->err eq 'OK' and $fnret->value and $fnret->value->{'stdout'}) {
             my %groups = map { $_ => 1 } split(/ /, $fnret->value->{'stdout'}->[0]);
 
@@ -293,7 +378,7 @@ sub sys_delmemberfromgroup {
 
             # we must also remove the primary group from the list
             # because -S (openbsd) / -G (linux) is only for secondary groups
-            $fnret = OVH::Bastion::execute(cmd => ['id', '-g', '-n', $user], %params);
+            $fnret = OVH::Bastion::execute(cmd => ['id', '-g', '-n', $user], %p);
             if ($fnret->err eq 'OK' and $fnret->value and $fnret->value->{'stdout'}) {
                 my $primary = $fnret->value->{'stdout'}->[0];
                 delete $groups{$primary};
@@ -338,19 +423,25 @@ sub sys_delmemberfromgroup {
         return R('OK');    # we're done, we've no other command to execute
     }
 
-    $params{'cmd'}          = \@cmd;
-    $params{'must_succeed'} = 1;
-    return _sys_autoretry(%params);
+    # we're removing a user from a group, clear the group cache
+    _clear_cache('groups');
+
+    $p{'cmd'}          = \@cmd;
+    $p{'must_succeed'} = 1;
+    return _sys_autoretry(%p);
 }
 
 sub sys_changepassword {
-    my %params   = @_;
-    my $user     = delete $params{'user'};
-    my $password = delete $params{'password'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory => [qw{ user password }],
+        optional  => [qw{ noisy_stderr }],
+    );
+    $fnret or return $fnret;
 
-    if (!$user || !$password) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory parameter 'user' or 'password'");
-    }
+    my $user     = delete $p{'user'};
+    my $password = delete $p{'password'};
 
     my @cmd;
     my $stdin_str;
@@ -364,7 +455,6 @@ sub sys_changepassword {
         $stdin_str = $password;
     }
     elsif (is_openbsd() || is_netbsd()) {
-        my $fnret;
         if (is_openbsd()) {
             $fnret = OVH::Bastion::execute(cmd => ["encrypt"], stdin_str => $password, must_succeed => 1);
         }
@@ -380,21 +470,27 @@ sub sys_changepassword {
         return R('ERR_NOT_IMPLEMENTED');
     }
 
-    $params{'stdin_str'}    = $stdin_str if defined $stdin_str;
-    $params{'cmd'}          = \@cmd;
-    $params{'must_succeed'} = 1;
-    my $fnret = _sys_autoretry(%params);
+    # we're changing the password of a user, which changes their passwd entry, clear cache
+    _clear_cache('users');
+
+    $p{'stdin_str'}    = $stdin_str if defined $stdin_str;
+    $p{'cmd'}          = \@cmd;
+    $p{'must_succeed'} = 1;
+    $fnret             = _sys_autoretry(%p);
     delete $ENV{'EDITOR'};
     return $fnret;
 }
 
 sub sys_neutralizepassword {
-    my %params = @_;
-    my $user   = delete $params{'user'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory => [qw{ user }],
+        optional  => [qw{ noisy_stderr }],
+    );
+    $fnret or return $fnret;
 
-    if (!$user) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory parameter 'user'");
-    }
+    my $user = delete $p{'user'};
 
     my @cmd;
     my $stdin_str;
@@ -413,22 +509,32 @@ sub sys_neutralizepassword {
         return R('ERR_NOT_IMPLEMENTED');
     }
 
-    $params{'stdin_str'}    = $stdin_str if defined $stdin_str;
-    $params{'cmd'}          = \@cmd;
-    $params{'must_succeed'} = 1;
-    my $fnret = _sys_autoretry(%params);
-    delete $ENV{'EDITOR'};
+    # we're changing the password of a user, which changes their passwd entry, clear cache
+    _clear_cache('users');
+
+    $p{'stdin_str'}    = $stdin_str if defined $stdin_str;
+    $p{'cmd'}          = \@cmd;
+    $p{'must_succeed'} = 1;
+    $fnret             = _sys_autoretry(%p);
+    delete $ENV{'EDITOR'};    # FIXME MIGRA !!?
     return $fnret;
 }
 
 sub sys_setpasswordpolicy {
-    my %params       = @_;
-    my $user         = delete $params{'user'};
-    my $expireDays   = delete $params{'expireDays'};
-    my $inactiveDays = delete $params{'inactiveDays'};
-    my $minDays      = delete $params{'minDays'};
-    my $maxDays      = delete $params{'maxDays'};
-    my $warnDays     = delete $params{'warnDays'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory       => [qw{ user }],
+        optionalFalseOk => [qw{ expireDays inactiveDays minDays maxDays warnDays noisy_stderr }],
+    );
+    $fnret or return $fnret;
+
+    my $user         = delete $p{'user'};
+    my $expireDays   = delete $p{'expireDays'};
+    my $inactiveDays = delete $p{'inactiveDays'};
+    my $minDays      = delete $p{'minDays'};
+    my $maxDays      = delete $p{'maxDays'};
+    my $warnDays     = delete $p{'warnDays'};
 
     if (!$user) {
         return R('ERR_MISSING_PARAMETER', msg => "Missing mandatory parameter 'user' or 'password'");
@@ -454,16 +560,24 @@ sub sys_setpasswordpolicy {
     else {
         return R('OK_IGNORED');
     }
+    # we're changing the policy of a user, which changes their passwd entry, clear cache
+    _clear_cache('users');
 
-    $params{'cmd'}          = \@cmd;
-    $params{'must_succeed'} = 1;
-    return _sys_autoretry(%params);
+    $p{'cmd'}          = \@cmd;
+    $p{'must_succeed'} = 1;
+    return _sys_autoretry(%p);
 }
 
 sub sys_getpasswordinfo {
-    my %params = @_;
-    my $user   = delete $params{'user'};
-    my $fnret;
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory => [qw{ user }],
+        optional  => [qw{ noisy_stderr }],
+    );
+    $fnret or return $fnret;
+
+    my $user = delete $p{'user'};
 
     my %ret;
     if (is_linux()) {
@@ -616,14 +730,10 @@ sub is_in_path {
 # as setpwent/endpwent can have side effects to any getpwent used between
 # them, possibly in other parts of the program, encapsulate everything here
 # to avoid side effects
-my %_pw_cache;
-my $_pw_all_cached = 0;
-
 sub sys_getpw_all {
     my %params = @_;
-    my $cache  = $params{'cache'} || $ENV{'PW_GR_CACHE'};
 
-    if (!$cache || !$_pw_all_cached) {
+    if (!$_pw_all_cached) {
         # end/set: for some reason, if we don't end() before set(), there seem
         # to be a cache somewhere, and we get entries that have been
         # deleted (milli)seconds before. This behaviour is undocumented, as set()
@@ -654,45 +764,35 @@ sub sys_getpw_all {
     return R('OK', value => \%_pw_cache);
 }
 
-sub sys_getpw_all_cached {
-    return R($_pw_all_cached ? 'OK' : 'KO');
-}
-
 # get a system account entry from name (getent passwd / getpwnam)
 sub sys_getpw_name {
-    my %params = @_;
-    my $cache  = $params{'cache'} || $ENV{'PW_GR_CACHE'};
-    my $name   = $params{'name'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p, mandatory => [qw{ name }],);
+    $fnret or return $fnret;
 
-    if (!$name) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing 'name' parameter");
-    }
+    my $name = $p{'name'};
 
-    if ($cache) {
-        # if cache is allowed and our $name entry exists in cache, return it
-        if (exists $_pw_cache{$name}) {
-            if (defined $_pw_cache{$name}) {
-                return R('OK', value => $_pw_cache{$name});
-            }
-            else {
-                # we cached its non-existence
-                return R('KO_NOT_FOUND', msg => "Account '$name' doesn't exist");
-            }
+    # if our $name entry exists in cache, return it
+    if (exists $_pw_cache{$name}) {
+        if (defined $_pw_cache{$name}) {
+            return R('OK', value => $_pw_cache{$name});
         }
-        # if cache is allowed, cache has been filled but our name entry is not
-        # there, it means the account doesn't exist
-        elsif ($_pw_all_cached) {
+        else {
+            # we cached its non-existence
             return R('KO_NOT_FOUND', msg => "Account '$name' doesn't exist");
         }
-        # if cache is allowed, cache has not been filled and our entry doesn't
-        # exist in cache, either we never cached anything, or we partly
-        # cached some accounts due to previous calls to sys_getpw_name()
-        # without a single call to sys_getpw_all(), in which case we need
-        # to fetch the data from the system using getpwnam()
     }
-
-    # if cache is not allowed, fetch data from system with getpwnam() and
-    # cache it. As we're just caching data for this account, don't set
+    # cache has been filled but our name entry is not
+    # there, it means the account doesn't exist
+    elsif ($_pw_all_cached) {
+        return R('KO_NOT_FOUND', msg => "Account '$name' doesn't exist");
+    }
+    # cache has not been filled and our entry doesn't
+    # exist in cache, either we never cached anything, or we partly
+    # cached some accounts due to previous calls to sys_getpw_name()
+    # without a single call to sys_getpw_all(), in which case we need
+    # to fetch the data from the system using getpwnam() and cache it.
+    # As we're just caching data for this account, don't set
     # $_pw_all_cached so that other funcs know that the cache is partial
     my @fields = getpwnam($name);
     if (@fields) {
@@ -723,14 +823,10 @@ sub sys_getpw_name {
 # as setgrent/endgrent can have side effects to any getgrent used between
 # them, possibly in other parts of the program, encapsulate everything here
 # to avoid side effects
-my %_gr_cache;
-my $_gr_all_cached = 0;
-
 sub sys_getgr_all {
     my %params = @_;
-    my $cache  = $params{'cache'} || $ENV{'PW_GR_CACHE'};
 
-    if (!$cache || !$_gr_all_cached) {
+    if (!$_gr_all_cached) {
         # end/set: for some reason, if we don't end() before set(), there seem
         # to be a cache somewhere, and we get entries that have been
         # deleted (milli)seconds before. This behaviour is undocumented, as set()
@@ -755,45 +851,35 @@ sub sys_getgr_all {
     return R('OK', value => \%_gr_cache);
 }
 
-sub sys_getgr_all_cached {
-    return R($_gr_all_cached ? 'OK' : 'KO');
-}
-
 # get a system group entry from name (getent group / getgrnam)
 sub sys_getgr_name {
-    my %params = @_;
-    my $name   = $params{'name'};
-    my $cache  = $params{'cache'} || $ENV{'PW_GR_CACHE'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p, mandatory => [qw{ name }],);
+    $fnret or return $fnret;
 
-    if (!$name) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing 'name' parameter");
-    }
+    my $name = $p{'name'};
 
-    if ($cache) {
-        # if cache is allowed and our $name entry exists in cache, return it
-        if (exists $_gr_cache{$name}) {
-            if (defined $_gr_cache{$name}) {
-                return R('OK', value => $_gr_cache{$name});
-            }
-            else {
-                # we cached its non-existence
-                return R('KO_NOT_FOUND', msg => "Group '$name' doesn't exist");
-            }
+    # if and our $name entry exists in cache, return it
+    if (exists $_gr_cache{$name}) {
+        if (defined $_gr_cache{$name}) {
+            return R('OK', value => $_gr_cache{$name});
         }
-        # if cache is allowed, cache has been filled but our name entry is not
-        # there, it means the group doesn't exist
-        elsif ($_gr_all_cached) {
+        else {
+            # we cached its non-existence
             return R('KO_NOT_FOUND', msg => "Group '$name' doesn't exist");
         }
-        # if cache is allowed, cache has not been filled and our entry doesn't
-        # exist in cache, either we never cached anything, or we partly
-        # cached some groups due to previous calls to sys_getgr_name()
-        # without a single call to sys_getgr_all(), in which case we need
-        # to fetch the data from the system using getgrnam()
     }
-
-    # if cache is not allowed, fetch data from system with getgrnam() and
-    # cache it. As we're just caching data for this group, don't set
+    # cache has been filled but our name entry is not
+    # there, it means the group doesn't exist
+    elsif ($_gr_all_cached) {
+        return R('KO_NOT_FOUND', msg => "Group '$name' doesn't exist");
+    }
+    # cache has not been filled and our entry doesn't
+    # exist in cache, either we never cached anything, or we partly
+    # cached some groups due to previous calls to sys_getgr_name()
+    # without a single call to sys_getgr_all(), in which case we need
+    # to fetch the data from the system using getgrnam() and cache it.
+    # As we're just caching data for this group, don't set
     # $_gr_all_cached so that other funcs know that the cache is partial
     my @fields = getgrnam($name);
     if (@fields) {

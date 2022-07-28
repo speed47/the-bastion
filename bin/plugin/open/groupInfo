@@ -10,9 +10,6 @@ use OVH::Result;
 use OVH::Bastion;
 use OVH::Bastion::Plugin qw( :DEFAULT help );
 
-# globally allow sys_getpw* and sys_getgr* cache use
-$ENV{'PW_GR_CACHE'} = 1;
-
 my ($group);
 my $remainingOptions = OVH::Bastion::Plugin::begin(
     argv     => \@ARGV,
@@ -94,7 +91,7 @@ if (   OVH::Bastion::is_group_owner(group => $shortGroup, account => $Self->name
             if (!$fnret || !@{$fnret->value}) {
 
                 # we couldn't get the list, or the list is empty: at least show that the realm shared account is there
-                warn_syslog("Couldn't get the remote accounts for realm $pRealm: ".$fnret->msg);
+                warn_syslog("Couldn't get the remote accounts for realm $pRealm: " . $fnret->msg);
                 push @members, $user;
             }
             else {

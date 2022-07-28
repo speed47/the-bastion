@@ -75,8 +75,11 @@ sub _mfa_toggle {
     # if the value is != bypass, remove the account from the bypass group
     if ($value ne 'bypass') {
         if (OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => $mfaGroupBypass)) {
-            $fnret =
-              OVH::Bastion::sys_delmemberfromgroup(user => $Account->sysUser, group => $mfaGroupBypass, noisy_stderr => 1);
+            $fnret = OVH::Bastion::sys_delmemberfromgroup(
+                user         => $Account->sysUser,
+                group        => $mfaGroupBypass,
+                noisy_stderr => 1
+            );
             if (!$fnret) {
                 osh_warn "... error while removing the bypass option for this account";
                 $result{$jsonkey} = R('ERR_REMOVING_FROM_GROUP');
@@ -89,7 +92,8 @@ sub _mfa_toggle {
     # if the value is == bypass, remove the account from the required group
     elsif ($value eq 'bypass') {
         if (OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => $mfaGroup)) {
-            $fnret = OVH::Bastion::sys_delmemberfromgroup(user => $Account->sysUser, group => $mfaGroup, noisy_stderr => 1);
+            $fnret =
+              OVH::Bastion::sys_delmemberfromgroup(user => $Account->sysUser, group => $mfaGroup, noisy_stderr => 1);
             if (!$fnret) {
                 osh_warn "... error while removing the required option for this account";
                 $result{$jsonkey} = R('ERR_REMOVING_FROM_GROUP');
@@ -152,7 +156,8 @@ sub _mfa_toggle {
             return;
         }
 
-        $fnret = OVH::Bastion::sys_addmembertogroup(user => $Account->sysUser, group => $mfaGroupBypass, noisy_stderr => 1);
+        $fnret =
+          OVH::Bastion::sys_addmembertogroup(user => $Account->sysUser, group => $mfaGroupBypass, noisy_stderr => 1);
         if (!$fnret) {
             osh_warn "... error while setting the enforce option";
             $result{$jsonkey} = R('ERR_ADDING_TO_GROUP');
@@ -173,9 +178,7 @@ sub _mfa_toggle {
 
 sub _toggle_yes_no {
     my %p = @_;
-    my $fnret = OVH::Bastion::check_args(\%p,
-        mandatory => [qw{ compositeKey keyname value }],
-    );
+    $fnret = OVH::Bastion::check_args(\%p, mandatory => [qw{ compositeKey keyname value }],);
     $fnret or return $fnret;
 
     my $keyname = $p{'keyname'};
@@ -191,8 +194,8 @@ sub _toggle_yes_no {
         $fnret = $Account->setConfig($p{'compositeKey'} => 'yes');
         if (!$fnret) {
             osh_warn "... error while setting the option";
-            return R('ERR_OPTION_CHANGE_FAILED');
             $nbErrors++;
+            return R('ERR_OPTION_CHANGE_FAILED');
         }
 
         osh_info "... done, this account is now $keyname";
@@ -208,16 +211,16 @@ sub _toggle_yes_no {
         $fnret = $Account->deleteConfig($p{'compositeKey'});
         if (!$fnret) {
             osh_warn "... error while removing the option";
-            return R('ERR_OPTION_CHANGE_FAILED');
             $nbErrors++;
+            return R('ERR_OPTION_CHANGE_FAILED');
         }
 
         osh_info "... done, this account has no longer the $keyname flag set";
         return R('OK');
     }
     else {
-        return R('ERR_INVALID_PARAMETER', msg => "Invalid value for ".$p{'compositeKey'});
         $nbErrors++;
+        return R('ERR_INVALID_PARAMETER', msg => "Invalid value for " . $p{'compositeKey'});
     }
 }
 
@@ -230,27 +233,28 @@ foreach my $tuple (@modify) {
     osh_debug "working on tuple key=$key value=$value";
     if ($key eq 'always-active') {
         $result{$jsonkey} = _toggle_yes_no(
-            keyname => 'always-active',
+            keyname      => 'always-active',
             compositeKey => "public/always_active",
-            value   => $value,
+            value        => $value,
         );
     }
     elsif ($key eq 'idle-ignore') {
         $result{$jsonkey} = _toggle_yes_no(
-            keyname => 'idle-ignore',
+            keyname      => 'idle-ignore',
             compositeKey => "public/idle_ignore",
-            value => $value,
+            value        => $value,
         );
     }
     elsif ($key eq 'osh-only') {
         $result{$jsonkey} = _toggle_yes_no(
-            keyname => 'osh-only',
-            value   => $value,
+            keyname      => 'osh-only',
+            value        => $value,
             compositeKey => "private/osh_only",
         );
     }
     elsif ($key eq 'pam-auth-bypass') {
-        $fnret = OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => OVH::Bastion::PAM_AUTH_BYPASS_GROUP);
+        $fnret =
+          OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => OVH::Bastion::PAM_AUTH_BYPASS_GROUP);
         if ($value eq 'yes') {
             {
                 osh_info "Bypassing sshd PAM auth usage for this account...";
@@ -303,8 +307,10 @@ foreach my $tuple (@modify) {
         }
     }
     elsif ($key eq 'pubkey-auth-optional') {
-        $fnret =
-          OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => OVH::Bastion::OSH_PUBKEY_AUTH_OPTIONAL_GROUP);
+        $fnret = OVH::Bastion::is_user_in_group(
+            user  => $Account->sysUser,
+            group => OVH::Bastion::OSH_PUBKEY_AUTH_OPTIONAL_GROUP
+        );
         if ($value eq 'yes') {
             {
                 osh_info "Making public key authentication optional for this account...";

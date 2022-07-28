@@ -88,7 +88,7 @@ my ($dryRun, $verbose);
 
 _log "Looking for group guests that no longer have any access to any server of the group...";
 
-$fnret = OVH::Bastion::get_group_list(groupType => "key");
+$fnret = OVH::Bastion::get_group_list();
 if (!$fnret) {
     _err "Couldn't get group list:" . $fnret->msg;
     exit 1;
@@ -106,10 +106,10 @@ foreach my $shortGroup (sort keys %$groups) {
 
         # the "members" of the system group key$shortGroup might be either members or guests,
         # so we first rule out members
-        next if OVH::Bastion::is_group_member(account => $account, group => $shortGroup, cache => 1);
+        next if OVH::Bastion::is_group_member(account => $account, group => $shortGroup);
 
         # it seems to be a guest, double-check that
-        next if !OVH::Bastion::is_group_guest(account => $account, group => $shortGroup, cache => 1);
+        next if !OVH::Bastion::is_group_guest(account => $account, group => $shortGroup);
 
         _log "<$shortGroup/$account> found a guest, checking remaining accesses..." if $verbose;
 
@@ -138,7 +138,7 @@ foreach my $shortGroup (sort keys %$groups) {
             _log "<$shortGroup/$account> The account is a guest of group but has no remaining access, cleaning up...";
 
             # get $group from $shortGroup
-            $fnret = OVH::Bastion::is_valid_group_and_existing(group => $shortGroup, groupType => 'key', cache => 1);
+            $fnret = OVH::Bastion::is_valid_group_and_existing(group => $shortGroup, groupType => 'key');
             if (!$fnret) {
                 _warn "<$shortGroup/$account> Group seems invalid ($fnret), skipping";
                 next;

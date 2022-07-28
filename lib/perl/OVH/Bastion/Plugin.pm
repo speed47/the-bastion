@@ -15,8 +15,8 @@ $SIG{'PIPE'} = 'IGNORE';    # continue even if osh_info gets a SIGPIPE because t
 $| = 1;
 
 use Exporter 'import';
-our             ( $Self,$user,$ip,$host,$port,$scriptName,$savedArgs ); ## no critic (ProhibitPackageVars)
-our @EXPORT = qw( $Self $user $ip $host $port $scriptName $savedArgs ); ## no critic (ProhibitAutomaticExportation)
+our ($Self, $user, $ip, $host, $port, $scriptName, $savedArgs);    ## no critic (ProhibitPackageVars)
+our @EXPORT    = qw( $Self $user $ip $host $port $scriptName $savedArgs );   ## no critic (ProhibitAutomaticExportation)
 our @EXPORT_OK = qw( help );
 
 my $_helptext;

@@ -14,7 +14,7 @@ sub preconditions {
         \%p,
         mandatory       => [qw{ Self group role action }],
         optional        => [qw{ host scriptName savedArgs account Account }],
-        optionalFalseOk => [qw{ user userAny port portAny ttl sudo silentoverride comment }],
+        optionalFalseOk => [qw{ user userAny port portAny ttl isHelper silentoverride comment }],
     );
     $fnret or return $fnret;
 
@@ -37,10 +37,10 @@ sub preconditions {
     # untaint it:
     $p{'role'} = $1;                                                      ## no critic (ProhibitCaptureWithoutTest)
 
-    if ($p{'role'} eq 'guest' && !$p{'sudo'}) {
+    if ($p{'role'} eq 'guest' && !$p{'isHelper'}) {
 
         # guest access need (user||user-any), host and (port||port-any)
-        # in sudo mode, these are not used, because the helper doesn't handle the guest access add by itself, the act() func of this package does
+        # in helper mode, these are not used, because the helper doesn't handle the guest access add by itself, the act() func of this package does
         if (!($p{'user'} xor $p{'userAny'})) {
             return R('ERR_MISSING_PARAMETER', msg => "Require exactly one argument of user or user-any");
         }
@@ -115,7 +115,6 @@ sub preconditions {
                 account    => $Self->name,
                 group      => $shortGroup,
                 superowner => 1,
-                sudo       => $p{'sudo'}
             );
             if (!$fnret) {
                 osh_debug("user " . $Self->name . " not an owner of $shortGroup");
@@ -137,7 +136,6 @@ sub preconditions {
                 account    => $Self->name,
                 group      => $shortGroup,
                 superowner => 1,
-                sudo       => $p{'sudo'}
             );
             if (!$fnret) {
                 osh_debug("user " . $Self->name . " not a gk of $shortGroup");
@@ -180,7 +178,9 @@ sub preconditions {
 }
 
 sub act {
-    my %p     = @_;
+    my %p = @_;
+    use Data::Dumper;
+    print Dumper(\%p);
     my $fnret = preconditions(%p);    # check_args is done there
     $fnret or return $fnret;
 
@@ -218,7 +218,7 @@ sub act {
     if ($role eq 'member') {
 
         if ($action eq 'add'
-            && OVH::Bastion::is_group_guest(group => $shortGroup, account => $Account->name, sudo => $p{'sudo'}))
+            && OVH::Bastion::is_group_guest(group => $shortGroup, account => $Account->name))
         {
 
             # if the user is a guest, must remove all their guest accesses first
@@ -307,7 +307,7 @@ sub act {
         }
 
         # If the account is already a member, can't add/del them as guest
-        if (OVH::Bastion::is_group_member(group => $shortGroup, account => $Account->name, sudo => $p{'sudo'})) {
+        if (OVH::Bastion::is_group_member(group => $shortGroup, account => $Account->name)) {
             return R('ERR_MEMBER_CANNOT_BE_GUEST',
                 msg => "Can't $action $Account as a guest of group $shortGroup, they're already a member!");
         }
@@ -377,7 +377,7 @@ sub act {
             }
 
             if ($accessesFound == 0
-                && !OVH::Bastion::is_group_member(group => $shortGroup, account => $Account->name, sudo => $p{'sudo'}))
+                && !OVH::Bastion::is_group_member(group => $shortGroup, account => $Account->name))
             {
                 osh_debug
                   "No guest access remains to group $shortGroup for account $Account, removing group key access";

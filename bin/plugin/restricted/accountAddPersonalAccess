@@ -102,9 +102,8 @@ if (not $account) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing mandatory parameter 'account'";
 }
 
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret or osh_exit $fnret;
-$account = $fnret->value->{'account'};
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or osh_exit($Account);
 
 if ($forceKey) {
     $fnret = OVH::Bastion::is_valid_fingerprint(fingerprint => $forceKey);
@@ -119,13 +118,13 @@ if ($forcePassword) {
 }
 
 osh_info
-  "Can't verify if $account\'s personal key have been installed to the remote server, as you don't have access to his private keys, adding the access blindly";
+  "Can't verify if $Account\'s personal key have been installed to the remote server, as you don't have access to his private keys, adding the access blindly";
 
 my @command = qw{ sudo -n -u allowkeeper -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountModifyPersonalAccess';
 push @command, '--target', 'any';
 push @command, '--action', 'add';
-push @command, '--account', $account;
+push @command, '--account', $Account->name;
 push @command, '--ip', $ip;
 push @command, '--user', $user if $user;
 push @command, '--port', $port if $port;

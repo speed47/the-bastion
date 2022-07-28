@@ -49,9 +49,19 @@ my $log_uniq_id = OVH::Bastion::generate_uniq_id()->value;
 $ENV{'UNIQID'} = $log_uniq_id;    # some modules need it, also used in warn/die handler
 
 # fetch basic connection info
-my ($ipfrom, $portfrom, $bastionip, $bastionport) = split(/\s/, $ENV{'SSH_CONNECTION'});
-my $hostfrom    = OVH::Bastion::ip2host($ipfrom)->value    || $ipfrom;      # FIXME if ipfrom is undef?
-my $bastionhost = OVH::Bastion::ip2host($bastionip)->value || $bastionip;
+my ($ipfrom, $portfrom, $bastionip, $bastionport, $hostfrom, $bastionhost);
+if (!$ENV{'SSH_CONNECTION'}) {
+    warn_syslog("osh.pl: SSH_CONNECTION is unset, we're not being called by an ssh session");
+}
+else {
+    ($ipfrom, $portfrom, $bastionip, $bastionport) = split(/\s/, $ENV{'SSH_CONNECTION'});
+    if ($ipfrom) {
+        $hostfrom = OVH::Bastion::ip2host($ipfrom)->value || $ipfrom;
+    }
+    if ($bastionip) {
+        $bastionhost = OVH::Bastion::ip2host($bastionip)->value || $bastionip;
+    }
+}
 
 # sub used to exit from this shell, also handles logs for early exits
 sub main_exit {
@@ -661,17 +671,17 @@ $ENV{'OSH_KBD_INTERACTIVE'} = 1 if $userKbdInteractive; # useful for plugins tha
 # MFA enforcing for ingress connection, either on global bastion config, or on specific account config
 my $mfaPolicy = OVH::Bastion::config('accountMFAPolicy')->value;
 my $isMfaPasswordConfigured =
-  OVH::Bastion::is_user_in_group(account => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_CONFIGURED_GROUP);
+  OVH::Bastion::is_user_in_group(user => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_CONFIGURED_GROUP);
 my $isMfaTOTPConfigured =
-  OVH::Bastion::is_user_in_group(account => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP);
+  OVH::Bastion::is_user_in_group(user => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP);
 my $isMfaPasswordRequired =
-  OVH::Bastion::is_user_in_group(account => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_REQUIRED_GROUP);
+  OVH::Bastion::is_user_in_group(user => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_REQUIRED_GROUP);
 my $hasMfaPasswordBypass =
-  OVH::Bastion::is_user_in_group(account => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP);
+  OVH::Bastion::is_user_in_group(user => $Self->sysUser, group => OVH::Bastion::MFA_PASSWORD_BYPASS_GROUP);
 my $isMfaTOTPRequired =
-  OVH::Bastion::is_user_in_group(account => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP);
+  OVH::Bastion::is_user_in_group(user => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_REQUIRED_GROUP);
 my $hasMfaTOTPBypass =
-  OVH::Bastion::is_user_in_group(account => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP);
+  OVH::Bastion::is_user_in_group(user => $Self->sysUser, group => OVH::Bastion::MFA_TOTP_BYPASS_GROUP);
 
 # MFA information from a potential ingress realm:
 my $remoteMfaValidated = 0;
@@ -757,7 +767,10 @@ osh_debug("self     : "
       . (defined $command ? $command : '<undef>')
       . "\n");
 
-my $hostto = OVH::Bastion::ip2host($host)->value || $host;
+my $hostto = $host;
+if ($host) {
+    $hostto = OVH::Bastion::ip2host($host)->value || $host;
+}
 
 # Special case: adminSudo for ssh connection as another user
 if ($sshAs) {
@@ -790,7 +803,8 @@ if ($sshAs) {
           "Can't use --ssh-as and --osh together. If you want to run a plugin as another user, use --osh adminSudo";
     }
     my $AccountSshAs = OVH::Bastion::Account->newFromName($sshAs, check => 1);
-    main_exit(OVH::Bastion::EXIT_ACCESS_DENIED, 'invalid_account', "Sorry, the specified account is invalid") if !$AccountSshAs;
+    main_exit(OVH::Bastion::EXIT_ACCESS_DENIED, 'invalid_account', "Sorry, the specified account is invalid")
+      if !$AccountSshAs;
 
     my @cmd = qw( sudo -n -u );
     push @cmd, $AccountSshAs->sysUser;
@@ -824,7 +838,8 @@ if ($sshAs) {
 
     osh_warn("ADMIN SUDO: $Self, you'll now impersonate $AccountSshAs, this has been logged.");
 
-    exec(@cmd) or main_exit(OVH::Bastion::EXIT_EXEC_FAILED,
+    exec(@cmd)
+      or main_exit(OVH::Bastion::EXIT_EXEC_FAILED,
         "ssh_as_failed", "Couldn't start a session under the account $AccountSshAs ($!)");
 }
 

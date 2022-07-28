@@ -37,9 +37,8 @@ if (not $account) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing 'account' parameter";
 }
 
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret or osh_exit $fnret;
-$account = $fnret->value->{'account'};
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or osh_exit($Account);
 
 $fnret = OVH::Bastion::get_bastion_ips();
 $fnret or osh_exit $fnret;
@@ -48,7 +47,7 @@ my $from = 'from="' . join(',', @{$fnret->value}) . '"';
 
 my @command = qw{ sudo -n -u keyreader -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountListEgressKeys';
-push @command, ('--account', $account);
+push @command, ('--account', $Account->name);
 
 $fnret = OVH::Bastion::helper(cmd => \@command);
 $fnret or osh_exit $fnret;

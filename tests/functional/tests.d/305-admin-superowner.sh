@@ -82,7 +82,7 @@ testsuite_admin_superowner()
 
     script delete_g1 "$a0 --osh groupDelete --group $group1 <<< $group1"
     retvalshouldbe 0
-    json .command groupDelete .error_code OK
+    json .command groupDelete .error_code OK .value.errors 0
 
     revoke accountDelete
     revoke groupDelete

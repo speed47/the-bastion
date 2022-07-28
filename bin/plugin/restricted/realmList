@@ -25,12 +25,12 @@ EOF
 
 my $fnret;
 if ($pRealm) {
-    $pRealm =~ s{^realm_}{};
     $fnret = OVH::Bastion::get_realm_list(realms => [$pRealm]);
 }
 else {
     $fnret = OVH::Bastion::get_realm_list();
 }
+
 $fnret or osh_exit $fnret;
 my $realms = $fnret->value;
 

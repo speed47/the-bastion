@@ -52,7 +52,7 @@ my $shortGroup = $fnret->value->{'shortGroup'};
 #<PARAMS:GROUP
 
 #>RIGHTSCHECK
-if ($self eq 'root') {
+if ($Self->isLocalRoot) {
     osh_debug "Real root, skipping checks of permissions";
 }
 else {
@@ -61,7 +61,7 @@ else {
     if (!$fnret) {
 
         # or we can delete our own group as the owner of said group
-        $fnret = OVH::Bastion::is_group_owner(account => $self, group => $shortGroup, sudo => 1, superowner => 1);
+        $fnret = OVH::Bastion::is_group_owner(account => $self, group => $shortGroup, superowner => 1);
         if (!$fnret) {
             HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $self");
         }
@@ -189,9 +189,8 @@ else {
 
 # trying to remove main and gatekeeper and owner groups
 foreach my $todelete ("$group-owner", "$group-aclkeeper", "$group-gatekeeper", $group) {
-    $fnret = OVH::Bastion::is_group_existing(group => $todelete);
+    $fnret = OVH::Bastion::sys_getgr_name(name => $todelete);
     if ($fnret) {
-        $todelete = $fnret->value->{'group'};    # untaint
         my $members = $fnret->value->{'members'} || [];
         if (@$members) {
             osh_info "Found " . (scalar @$members) . " members, removing them from the group";
@@ -208,8 +207,8 @@ foreach my $todelete ("$group-owner", "$group-aclkeeper", "$group-gatekeeper", $
         }
 
         if ($todelete eq $group) {
-            osh_info "Deleting main user of group $todelete...",
-              $fnret = OVH::Bastion::sys_userdel(user => $todelete, noisy_stderr => 1);
+            osh_info "Deleting main user of group $todelete...";
+            $fnret = OVH::Bastion::sys_userdel(user => $todelete, noisy_stderr => 1);
             if ($fnret->err ne 'OK') {
                 warn_syslog("Error while attempting to delete main user of group $todelete ("
                       . $fnret->msg
@@ -221,7 +220,7 @@ foreach my $todelete ("$group-owner", "$group-aclkeeper", "$group-gatekeeper", $
         # some OSes delete the main group of user if it has the same name
         # and nobody else is a member of it, so check it still exists before
         # trying to delete it
-        $fnret = OVH::Bastion::is_group_existing(group => $todelete);
+        $fnret = OVH::Bastion::sys_getgr_name(name => $todelete);
         if ($fnret) {
             osh_info "Deleting group $todelete...";
             $fnret = OVH::Bastion::sys_groupdel(group => $todelete, noisy_stderr => 1);

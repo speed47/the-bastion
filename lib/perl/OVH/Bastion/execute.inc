@@ -12,16 +12,19 @@ use JSON;
 use POSIX ":sys_wait_h";
 use Symbol 'gensym';
 
-# Get signal names, i.e. signal 9 is SIGKILL, etc.
-my %signum2string;
-@signum2string{split ' ', $Config{sig_num}} = map { "SIG$_" } split ' ', $Config{sig_name};
-
 sub sysret2human {
     my $sysret = shift;
+
     if ($sysret == -1) {
         return R('OK', msg => "error: failed to execute ($!)");
     }
     elsif ($sysret & 127) {
+        state %signum2string;
+        # Get signal names, i.e. signal 9 is SIGKILL, etc.
+        if (%signum2string) {
+            @signum2string{split ' ', $Config{sig_num}} = map { "SIG$_" } split ' ', $Config{sig_name};
+        }
+
         my $signal   = $sysret & 127;
         my $coredump = $sysret & 128;
         return R(
@@ -45,22 +48,31 @@ sub sysret2human {
 
 ## no critic(ControlStructures::ProhibitDeepNests)
 sub execute {
-    my %params        = @_;
-    my $cmd           = $params{'cmd'};            # command to execute, must be an array ref (with possible parameters)
-    my $expects_stdin = $params{'expects_stdin'};  # the command called expects stdin, pipe caller stdin to it
-    my $noisy_stdout  = $params{'noisy_stdout'};   # capture stdout but print it too
-    my $noisy_stderr  = $params{'noisy_stderr'};   # capture stderr but print it too
-    my $is_helper     = $params{'is_helper'};      # hide JSON returns from stdout even if noisy_stdout
-    my $is_binary = $params{'is_binary'}; # used for e.g. scp, don't bother mimicking readline(), we lose debug and stdout/stderr are NOT returned to caller
-    my $stdin_str = $params{'stdin_str'}; # string to push to the STDIN of the command
-    my $must_succeed = $params{'must_succeed'}; # if the executed command returns a non-zero exit value, turn OK_NON_ZERO_EXIT to ERR_NON_ZERO_EXIT
-    my $max_stdout_bytes = $params{'max_stdout_bytes'}; # if the amount of stored stdout bytes exceeds this, halt the command and return to caller
-    my $system           = $params{'system'};           # if set to 1, will use system() instead of open3(), needed for some plugins
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory       => [qw{ cmd }],
+        optionalFalseOk => [
+            qw{ expects_stdin noisy_stdout noisy_stderr is_helper is_binary stdin_str
+              must_succeed max_stdout_bytes system }
+        ],
+    );
+    $fnret or return $fnret;
+
+    my $cmd           = $p{'cmd'};              # command to execute, must be an array ref (with possible parameters)
+    my $expects_stdin = $p{'expects_stdin'};    # the command called expects stdin, pipe caller stdin to it
+    my $noisy_stdout  = $p{'noisy_stdout'};     # capture stdout but print it too
+    my $noisy_stderr  = $p{'noisy_stderr'};     # capture stderr but print it too
+    my $is_helper     = $p{'is_helper'};        # hide JSON returns from stdout even if noisy_stdout
+    my $is_binary = $p{'is_binary'}; # used for e.g. scp, don't bother mimicking readline(), we lose debug and stdout/stderr are NOT returned to caller
+    my $stdin_str = $p{'stdin_str'}; # string to push to the STDIN of the command
+    my $must_succeed = $p{'must_succeed'}; # if the executed command returns a non-zero exit value, turn OK_NON_ZERO_EXIT to ERR_NON_ZERO_EXIT
+    my $max_stdout_bytes = $p{'max_stdout_bytes'}; # if the amount of stored stdout bytes exceeds this, halt the command and return to caller
+    my $system           = $p{'system'};           # if set to 1, will use system() instead of open3(), needed for some plugins
 
     $noisy_stderr = $noisy_stdout = 1 if ($ENV{'PLUGIN_DEBUG'} or $is_binary);
 
-    my $readsize = $is_binary ? 16384 : 1;              # XXX needs to be enhanced to be > 1 even for non-binary
-    my $fnret;
+    my $readsize = $is_binary ? 16384 : 1;         # XXX needs to be enhanced to be > 1 even for non-binary
 
 =cut only to debug slow calls
     if (not $is_binary)
@@ -369,11 +381,16 @@ sub execute {
 # while execute_simple() uses a buffer of 16K instead, which is several orders of
 # magnitude faster for commands outputting large amounts of data (several megabytes) for example.
 sub execute_simple {
-    my %params = @_;
-    my $cmd    = $params{'cmd'};    # command to execute, must be an array ref (with possible parameters)
-    my $must_succeed = $params{'must_succeed'}; # if the executed command returns a non-zero exit value, turn OK_NON_ZERO_EXIT to ERR_NON_ZERO_EXIT
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory       => [qw{ cmd }],
+        optionalFalseOk => [qw{ must_succeed }],
+    );
+    $fnret or return $fnret;
 
-    my $fnret;
+    my $cmd = $p{'cmd'};    # command to execute, must be an array ref (with possible parameters)
+    my $must_succeed = $p{'must_succeed'}; # if the executed command returns a non-zero exit value, turn OK_NON_ZERO_EXIT to ERR_NON_ZERO_EXIT
 
     require Scalar::Util;
     foreach (@$cmd) {

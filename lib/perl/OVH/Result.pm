@@ -3,6 +3,8 @@ package OVH::Result;
 # vim: set filetype=perl ts=4 sw=4 sts=4 et:
 use common::sense;
 
+use Hash::Util qw{ lock_hashref_recurse };
+
 # not enabled on prod, see "trace" comment below
 # use Carp ();
 # $Carp::MaxArgLen  = 512;
@@ -23,6 +25,7 @@ sub new {                 ## no critic (ArgUnpacking)
     my $value  = $params{'value'};
     my $msg    = $params{'msg'};
     my $silent = $params{'silent'};
+    my $noLock = $params{'noLock'};
 
     my $Object = {
         err   => $err,
@@ -42,6 +45,7 @@ sub new {                 ## no critic (ArgUnpacking)
     #    "$0 R[" . ($err ? $err : '<u>') . " " . ($value ? $value : '<u>') . " " . ($msg ? $msg : '<u>'))
     #  if (!$silent && !$Object->is_ok());
 
+    # lock_hashref_recurse($Object) if !$noLock; # FIXME whenever we're ready
     return $Object;
 }
 

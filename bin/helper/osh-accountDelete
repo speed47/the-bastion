@@ -151,7 +151,9 @@ $fnret = OVH::Bastion::execute_simple(cmd => ['mv', $Account->home, $homeBackupD
 if (!$fnret) {
     my $msg = substr($fnret->value->{'output'}, 0, 128);
     $msg =~ s=[^a-zA-Z0-9./_-]=_=g;
-    warn_syslog("Error while backing up to-be-deleted '".$Account->home."' to '$homeBackupDir' ($msg)"
+    warn_syslog("Error while backing up to-be-deleted '"
+          . $Account->home
+          . "' to '$homeBackupDir' ($msg)"
           . ", continuing anyway...");
     $nbErrors++;
 }
@@ -164,7 +166,8 @@ $fnret = OVH::Bastion::execute_simple(
 if (!$fnret) {
     my $msg = substr($fnret->value->{'output'}, 0, 128);
     $msg =~ s=[^a-zA-Z0-9./_-]=_=g;
-    warn_syslog("Error while backing up to-be-deleted '".$Account->allowkeeperHome."' to "
+    warn_syslog("Error while backing up to-be-deleted '"
+          . $Account->allowkeeperHome . "' to "
           . "'$allowkeeperBackupDir' ($msg), continuing anyway...");
     $nbErrors++;
 }
@@ -175,7 +178,7 @@ $fnret = OVH::Bastion::execute(
 
 # remove sudoers if it's there
 $fnret = OVH::Bastion::execute(
-    cmd          => [$OVH::Bastion::BASEPATH . '/bin/sudogen/generate-sudoers.sh', 'delete', 'account', $Account->sysUser],
+    cmd => [$OVH::Bastion::BASEPATH . '/bin/sudogen/generate-sudoers.sh', 'delete', 'account', $Account->sysUser],
     must_succeed => 1,
     noisy_stdout => 1
 );
@@ -188,9 +191,9 @@ if (!$fnret) {
 $fnret = $Account->getGroups();
 if ($fnret) {
     if (open(my $txtfile, '>', "$fulldir/groups.txt")) {
-        foreach my $group (sort keys %{ $fnret->value }) {
-            foreach my $role (sort keys %{ $fnret->value->{$group} }) {
-                printf { $txtfile } "%s %s\n", $group, $role;
+        foreach my $group (sort keys %{$fnret->value}) {
+            foreach my $role (sort keys %{$fnret->value->{$group}}) {
+                printf {$txtfile} "%s %s\n", $group, $role;
             }
         }
         close($txtfile);
@@ -210,7 +213,8 @@ push @tarcmd, '--one-file-system', '-p', '--remove-files', $fulldir;
 
 $fnret = OVH::Bastion::execute(cmd => \@tarcmd, must_succeed => 1);
 if (!$fnret) {
-    warn_syslog("Couldn't tar the backup homedir '$fulldir' of account '$Account' (" . $fnret->msg . "), proceeding anyway.");
+    warn_syslog(
+        "Couldn't tar the backup homedir '$fulldir' of account '$Account' (" . $fnret->msg . "), proceeding anyway.");
     my $i = 0;
     foreach (@{$fnret->value->{'stderr'} || []}) {
         warn_syslog("tar: $_");
@@ -240,10 +244,10 @@ if (!$fnret) {
     warn_syslog("Couldn't delete '$Account' group membership from 'keyreader' user ($fnret), proceeding anyway");
     $nbErrors++;
 }
-osh_info "Deleting system user '".$Account->sysUser."'...";
+osh_info "Deleting system user '" . $Account->sysUser . "'...";
 $fnret = OVH::Bastion::sys_userdel(user => $Account->sysUser);
 if (!$fnret) {
-    warn_syslog("Couldn't delete system user '".$Account->sysUser."' ($fnret), proceeding anyway");
+    warn_syslog("Couldn't delete system user '" . $Account->sysUser . "' ($fnret), proceeding anyway");
     $nbErrors++;
 }
 
@@ -253,16 +257,16 @@ if ($fnret) {
     osh_info "Deleting account main group '$Account'...";
     $fnret = OVH::Bastion::sys_groupdel(group => $Account->sysUser);
     if (!$fnret) {
-        warn_syslog("Couldn't delete account main group '".$Account->sysUser."' ($fnret), proceeding anyway");
+        warn_syslog("Couldn't delete account main group '" . $Account->sysUser . "' ($fnret), proceeding anyway");
         $nbErrors++;
     }
 }
 
 if ($Account->ttyGroup) {
-    osh_info "Deleting group ".$Account->ttyGroup."...";
+    osh_info "Deleting group " . $Account->ttyGroup . "...";
     $fnret = OVH::Bastion::sys_groupdel(group => $Account->ttyGroup);
     if (!$fnret) {
-        warn_syslog("Couldn't delete group '".$Account->ttyGroup."' ($fnret), proceeding anyway");
+        warn_syslog("Couldn't delete group '" . $Account->ttyGroup . "' ($fnret), proceeding anyway");
         $nbErrors++;
     }
 }
@@ -282,6 +286,7 @@ OVH::Bastion::syslogFormatted(
 
 HEXIT(
     'OK',
-    value => {account => $Account->name, ttygroup => $Account->ttyGroup, operation => 'deleted', errors => $nbErrors + 0},
-    msg   => "Account $Account has been deleted"
+    value =>
+      {account => $Account->name, ttygroup => $Account->ttyGroup, operation => 'deleted', errors => $nbErrors + 0},
+    msg => "Account $Account has been deleted"
 );

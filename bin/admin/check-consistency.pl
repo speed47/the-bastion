@@ -532,7 +532,7 @@ foreach my $account (keys %users) {
         "-rw-r--r--",
         "allowkeeper",
         "allowkeeper"
-    );
+    ) if $account !~ /^realm_/;
     check_file_rights(
         "/home/allowkeeper/$account/allowed.private",
         [
@@ -543,7 +543,7 @@ foreach my $account (keys %users) {
         "-rw-r--r--",
         "allowkeeper",
         "allowkeeper"
-    );
+    ) if $account !~ /^realm_/;
     if (!-e "/home/allowkeeper/$account/allowed.private" && $ENV{'FIX_MISSING_PRIVATE_FILES'}) {
         if (open(my $fh_priv, '>', "/home/allowkeeper/$account/allowed.private")) {
             close($fh_priv);

@@ -9,9 +9,6 @@ use OVH::Result;
 use OVH::Bastion;
 use OVH::Bastion::Plugin qw( :DEFAULT help );
 
-# globally allow sys_getpw* and sys_getgr* cache use
-$ENV{'PW_GR_CACHE'} = 1;
-
 my (@ignoreGroups, $ignorePersonal, $showWildcards);
 my $remainingOptions = OVH::Bastion::Plugin::begin(
     argv    => \@ARGV,
@@ -54,7 +51,7 @@ if (!$ip) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing parameter host (or it didn't resolve correctly)";
 }
 
-$fnret = OVH::Bastion::get_account_list();
+$fnret = OVH::Bastion::get_account_list(fast => 1);
 $fnret or osh_exit $fnret;
 
 osh_warn "IMPORTANT: read the --help of this command to understand what is shown here and why.";
@@ -64,10 +61,10 @@ my $result_hash = {};
 
 sub process_account {
     my %params  = @_;
-    my $account = $params{'account'};
+    my $Account = $params{'Account'};
 
     $fnret = OVH::Bastion::is_access_granted(
-        account    => $account,
+        account    => $Account->name,
         user       => $user,
         ip         => $ip,
         ipfrom     => $ENV{'OSH_IP_FROM'},
@@ -93,47 +90,54 @@ sub process_account {
 
         my @shortGroups = sort keys %byGroups;
         if ($byPersonal and keys %byGroups) {
-            osh_info "$account has access by his "
+            osh_info "$Account has access by his "
               . colored('personal', 'red')
               . " key and by the following groups: "
               . colored(join(' ', @shortGroups), "green");
-            $result_hash->{$account} = {personal_access => 1, group_access => [sort keys %byGroups]};
+            $result_hash->{$Account->name} = {personal_access => 1, group_access => [sort keys %byGroups]};
         }
         elsif ($byPersonal) {
-            osh_info "$account has access by his " . colored('personal', 'red') . " key only";
-            $result_hash->{$account} = {personal_access => 1, group_access => []};
+            osh_info "$Account has access by his " . colored('personal', 'red') . " key only";
+            $result_hash->{$Account->name} = {personal_access => 1, group_access => []};
         }
         elsif (keys %byGroups) {
-            osh_info "$account has access by the following groups: " . colored(join(' ', @shortGroups), "green");
-            $result_hash->{$account} = {personal_access => 0, group_access => [sort keys %byGroups]};
+            osh_info "$Account has access by the following groups: " . colored(join(' ', @shortGroups), "green");
+            $result_hash->{$Account->name} = {personal_access => 0, group_access => [sort keys %byGroups]};
         }
         else {
-            ;    #osh_info "$account has access (I don't know how!!?)";
+            warn_syslog("Account '$Account' has an unknown access");
         }
     }
 
     return 1;
 }
 
-my @accounts = sort keys %{$fnret->value};
-foreach my $account (@accounts) {
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, localOnly => 1);
-    if (!$fnret) {
-
-        # maybe it's a realm shared account ?
-        my ($realm) = $account =~ /^realm_(.+)$/;
-        $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, accountType => "realm");
-        $fnret or next;
-
-        # it is. ok, get all the known remote accounts
-        $fnret = OVH::Bastion::get_remote_accounts_from_realm(realm => $account);
-        $fnret or next;
+my %accounts = %{$fnret->value};
+foreach my $accountName (sort keys %accounts) {
+    my $Account = $accounts{$accountName};
+    if ($Account->type eq 'local') {
+        process_account(Account => $Account);
+    }
+    elsif ($Account->type eq 'realm') {
+        # get all the known remote accounts of this realm
+        $fnret = OVH::Bastion::get_remote_accounts_from_realm(realm => $Account->realm); # FIXME does a sharedrealmacc has a ->realm?
+        if (!$fnret) {
+            warn_syslog("Error listing the remote accounts of realm '" . $Account->realm . "': " . $fnret->msg);
+            next;
+        }
         foreach my $remoteaccount (@{$fnret->value || []}) {
-            process_account(account => "$realm/$remoteaccount");
+            my $RemoteAccount = OVH::Bastion::Account->newFromName($Account->realm . '/' . $remoteaccount);
+            if (!$RemoteAccount) {
+                warn_syslog("Error instanciating the remote account '$remoteaccount' of realm '"
+                      . $Account->realm . "': "
+                      . $RemoteAccount->msg);
+                next;
+            }
+            process_account(Account => $RemoteAccount);
         }
     }
     else {
-        process_account(account => $account);
+        warn_syslog("Unknown account type '" . $Account->type . "', ignoring");
     }
 }
 

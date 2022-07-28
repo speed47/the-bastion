@@ -38,11 +38,17 @@ sub _get_prompt_non_readline {
 }
 
 sub interactive {
-    my %params         = @_;
-    my $realOptions    = $params{'realOptions'};
-    my $timeoutHandler = $params{'timeoutHandler'};
-    my $Self           = $params{'Self'};
-    my $fnret;
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory       => [qw{ Self }],
+        optionalFalseOk => [qw{ realOptions timeoutHandler }]
+    );
+    $fnret or return $fnret;
+
+    my $realOptions    = $p{'realOptions'};
+    my $timeoutHandler = $p{'timeoutHandler'};
+    my $Self           = $p{'Self'};
 
     $fnret = $Self->isExisting();
     $fnret or return $fnret;
@@ -141,9 +147,9 @@ EOM
             return @validcmds;
         }
 
-        my $accountList          = OVH::Bastion::get_account_list(cache => 1)->value;
-        my $groupList            = OVH::Bastion::get_group_list(cache => 1, groupType => 'key')->value;
-        my $realmList            = OVH::Bastion::get_realm_list(cache => 1)->value;
+        my $accountList          = OVH::Bastion::get_account_list(fast => 1)->value;
+        my $groupList            = OVH::Bastion::get_group_list()->value;
+        my $realmList            = OVH::Bastion::get_realm_list()->value;
         my $pluginListRestricted = OVH::Bastion::get_plugin_list(restrictedOnly => 1)->value;
         foreach my $i (0 .. $#rules) {
             my $re   = $rules[$i++];

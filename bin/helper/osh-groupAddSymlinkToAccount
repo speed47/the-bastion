@@ -77,7 +77,7 @@ if ($self eq 'root') {
     osh_debug "Real root, skipping checks of permissions";
 }
 else {
-    $fnret = OVH::Bastion::is_group_gatekeeper(account => $self, group => $shortGroup, superowner => 1, sudo => 1);
+    $fnret = OVH::Bastion::is_group_gatekeeper(account => $self, group => $shortGroup, superowner => 1);
     if (!$fnret) {
         warn_syslog("$0: account $self is not a $shortGroup gatekeeper, refused to continue");
         HEXIT('ERR_NOT_ALLOWED', msg => "Sorry, you're not a gatekeeper of group $shortGroup");

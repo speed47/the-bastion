@@ -12,9 +12,6 @@ use OVH::Result;
 use OVH::Bastion;
 use OVH::Bastion::Plugin qw( :DEFAULT help );
 
-# globally allow sys_getpw* and sys_getgr* cache use
-$ENV{'PW_GR_CACHE'} = 1;
-
 OVH::Bastion::Plugin::begin(
     argv     => \@ARGV,
     header   => "account information",
@@ -259,7 +256,7 @@ if ($Self->isAuditor) {
     osh_info "\nAccount PIV-only policy status:";
     $fnret = $Account->getConfig("public/ingress_piv_policy");
     $ret{'ingress_piv_enforced'} = ($fnret && $fnret->value eq 'yes') ? \1 : \0;    # keep for backwards compat
-    $ret{'ingress_piv_policy'}   = $fnret->value || undef;
+    $ret{'ingress_piv_policy'} = $fnret->value || undef;
     my $ingress_piv_policy_print = $ret{'ingress_piv_policy'} || 'default';
     osh_info "- PIV policy for ingress keys on this account is set to "
       . colored($ingress_piv_policy_print, $ingress_piv_policy_print eq 'default' ? 'blue' : 'green');

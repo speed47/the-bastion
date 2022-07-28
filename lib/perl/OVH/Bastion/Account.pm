@@ -3,7 +3,7 @@ use common::sense;
 
 use Cwd; # getcwd
 use Fcntl;
-use Hash::Util qw{ lock_hashref lock_hashref_recurse unlock_hashref unlock_hashref_recurse lock_ref_value unlock_ref_value };
+use Hash::Util qw{ lock_hashref_recurse lock_ref_value unlock_ref_value };
 use List::Util qw{ any none };
 use Memoize;
 use Scalar::Util qw{ refaddr };
@@ -13,8 +13,8 @@ use OVH::Result;
 
 use overload (
     '""' => 'name',
-    'eq' => 'eq',
-    'ne' => 'ne',
+    'eq' => 'equal',
+    'ne' => 'notEqual',
 );
 
 # we'll instruct memoize to use this hash,
@@ -26,13 +26,13 @@ my %CACHE;
 sub _normalize {
     my ($func, $this, @args) = @_;
     my @x = (refaddr($this), $func);
-    push @x, map { defined($_) ? $_ : chr(29) } @args;
+    push @x, map { defined ? $_ : chr(29) } @args;
     return join("!", @x);
 }
 
 sub _memoizify {
     my $funcname = shift;
-    memoize(
+    return memoize(
         $funcname,
         SCALAR_CACHE => ['HASH' => \%CACHE],
         LIST_CACHE => 'FAULT',
@@ -172,7 +172,7 @@ BEGIN {
             if (none { $this->type eq $_ } qw{ local remote }) {
                 OVH::Bastion::warn_syslog("Attempted to access attribute '$attr' on '$this' "
                     . "which is of type ".$this->type);
-                return undef;
+                return;
             }
             return $this->{$attr};
         };
@@ -195,12 +195,12 @@ BEGIN {
     use strict "refs";
 }
 
-sub eq {
+sub equal {
     my ($this, $that) = @_;
     return (ref $this eq ref $that && $this->name eq $that->name);
 }
 
-sub ne {
+sub notEqual {
     my ($this, $that) = @_;
     return !($this eq $that);
 }
@@ -457,7 +457,7 @@ sub isNotExpired {
     my $lastlog;
     # XXX HERE
     my $filepath = sprintf("/home/%s/lastlog%s", $this->sysUser, $this->remoteName ? "_".$this->remoteName : ""); # FIXME move login into Account
-    my $value    = {filepath => $filepath};
+    my $value    = {filepath => $filepath, info => undef};
     if (-e $filepath) {
         $isFirstLogin = 0;
         $lastlog      = (stat(_))[9];
@@ -537,7 +537,6 @@ _memoizify('isExisting');
 sub isExisting {
     my ($this, %p) = @_;
     my $fnret = OVH::Bastion::check_args(\%p,
-        optional => [qw{ nocache }],
         optionalFalseOk => [qw{ ignoreConfig }],
     );
     $fnret or return $fnret;
@@ -556,7 +555,7 @@ sub isExisting {
         );
     }
     else {
-        my $fnret = OVH::Bastion::sys_getpw_name(name => $this->sysUser, cache => !$p{'nocache'});
+        $fnret = OVH::Bastion::sys_getpw_name(name => $this->sysUser);
         if ($fnret) {
             %entry = %{$fnret->value};
         }
@@ -848,9 +847,7 @@ _memoizify('getGroups');
 sub getGroups {
     my ($this, %p) = @_;
 
-    my $fnret = OVH::Bastion::check_args(\%p,
-        optionalFalseOk => ['cache'] # allow use of sys_getgr_all's cache
-    );
+    my $fnret = OVH::Bastion::check_args(\%p);
 
     $fnret = $this->isExisting();
     $fnret or return $fnret;
@@ -860,7 +857,7 @@ sub getGroups {
     # group, this translate as either "member" or "guest" of the bastion group).
     # for the key* groups, member means aclkeeper, gatekeeper or owner of the
     # corresponding bastion group
-    $fnret = OVH::Bastion::sys_getgr_all(cache => $p{'cache'});
+    $fnret = OVH::Bastion::sys_getgr_all();
     $fnret or return $fnret;
 
     my %result;
@@ -954,7 +951,7 @@ sub canExecutePlugin {
                 my $canDo = $this->isSuperOwner ? 1 : 0;
 
                 # or if we are $type on at least one group
-                $canDo++ if (any { $_->{$type} } values %groups);
+                $canDo++ if (any { exists($_->{$type}) && $_->{$type} } values %groups);
 
                 return R(
                     'OK',
@@ -982,7 +979,7 @@ sub canExecutePlugin {
 
     # restricted plugins (osh-* system groups based)
     if (-f ($path_plugin . '/restricted/' . $plugin)) {
-        if (OVH::Bastion::is_user_in_group(user => $this->sysUser, group => "osh-$plugin", cache => 1)) {
+        if (OVH::Bastion::is_user_in_group(user => $this->sysUser, group => "osh-$plugin")) {
             return R('OK',
                 value => {fullpath => $path_plugin . '/restricted/' . $plugin, type => 'restricted', plugin => $plugin}
             );
@@ -1173,7 +1170,7 @@ sub accessModify {
         optional => [qw{ group }],
     );
 
-    my $fnret = $this->isExisting();
+    $fnret = $this->isExisting();
     $fnret or return $fnret;
 
     return OVH::Bastion::access_modify(Account => $this, %p);

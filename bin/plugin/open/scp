@@ -107,7 +107,7 @@ if (not $ip) {
 
 my $machine = $ip;
 $machine = "$user\@$ip" if $user;
-$port ||= 22;       # scp uses 22 if not specified, so we need to test access to that port and not any port (aka undef)
+$port ||= 22;    # scp uses 22 if not specified, so we need to test access to that port and not any port (aka undef)
 $user ||= $Self->sysUser;    # same for user
 $machine .= ":$port";
 

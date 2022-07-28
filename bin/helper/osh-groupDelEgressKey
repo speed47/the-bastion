@@ -55,7 +55,7 @@ my $shortGroup = $fnret->value->{'shortGroup'};
 if ($self eq 'root') {
     osh_debug "Real root, skipping checks of permissions";
 }
-$fnret = OVH::Bastion::is_group_owner(account => $self, group => $shortGroup, superowner => 1, sudo => 1);
+$fnret = OVH::Bastion::is_group_owner(account => $self, group => $shortGroup, superowner => 1);
 if (!$fnret) {
     HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $self");
 }

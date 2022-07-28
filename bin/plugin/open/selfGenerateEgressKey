@@ -49,7 +49,7 @@ my $fnret;
 
 $fnret = OVH::Bastion::Plugin::generateEgressKey::preconditions(
     context => 'account',
-    account => $Self->name,
+    Account => $Self,
     algo    => $algo,
     size    => $size
 );

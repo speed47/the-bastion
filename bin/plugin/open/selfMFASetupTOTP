@@ -69,8 +69,9 @@ elsif ($TOTPProvider eq 'google-authenticator') {
         '-q',
         '-c',
         "google-authenticator -f -t -Q UTF8 -r 3 -R 15 -w 2 -D "
-          . join(" ", @additional_params)
-          . " -l ".$Self->name." -s ".$Self->home."/"
+          . join(" ", @additional_params) . " -l "
+          . $Self->name . " -s "
+          . $Self->home . "/"
           . OVH::Bastion::TOTP_GAUTH_FILENAME,
         '/dev/null'
     );

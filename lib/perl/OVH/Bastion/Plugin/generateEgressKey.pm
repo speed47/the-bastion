@@ -74,8 +74,8 @@ sub preconditions {
     my %params = @_;
     my $fnret;
 
-    my ($self, $group, $algo, $size, $account, $sudo, $context) =
-      @params{qw{  self   group   algo   size   account   sudo   context}};
+    my ($Self, $group, $algo, $size, $account, $Account, $context) =
+      @params{qw{  Self  group  algo   size   account   Account   context}};
 
     if (!$algo || !$context) {
         return R('ERR_MISSING_PARAMETER', msg => "Missing argument algo[$algo] or context[$context]");
@@ -92,8 +92,8 @@ sub preconditions {
 
     # check preconditions if we're generating a key for a group
     if ($context eq 'group') {
-        if (!$group || !$self) {
-            return R('ERR_MISSING_PARAMETER', msg => "Missing 'group' or 'self' parameter");
+        if (!$group || !$Self) {
+            return R('ERR_MISSING_PARAMETER', msg => "Missing 'group' or 'Self' parameter");
         }
         $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => 'key');
         $fnret or return $fnret;
@@ -101,7 +101,7 @@ sub preconditions {
         my $shortGroup = $fnret->value->{'shortGroup'};
         $group = $fnret->value->{'group'};
 
-        $fnret = OVH::Bastion::is_group_owner(group => $shortGroup, account => $self, superowner => 1, sudo => $sudo);
+        $fnret = OVH::Bastion::is_group_owner(group => $shortGroup, account => $Self->name, superowner => 1);
         if (!$fnret) {
             return R('ERR_NOT_GROUP_OWNER',
                 msg =>
@@ -122,10 +122,14 @@ sub preconditions {
         );
     }
     elsif ($context eq 'account') {
-        if (!$account) {
+        if (!$account && !$Account) {
             return R('ERR_MISSING_PARAMETER', msg => "Missing 'group' parameter");
         }
-        $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
+        if (!$Account) {
+            $Account = OVH::Bastion::Account->newFromName($account);
+            $Account or return $Account;
+        }
+        $fnret = $Account->check();
         $fnret or return $fnret;
 
         return R('OK', value => {algo => $algo, size => $size, context => $context});

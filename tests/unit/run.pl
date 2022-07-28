@@ -1,7 +1,8 @@
 #! /usr/bin/env perl
-exit(0); # FIXME MIGRA
 # vim: set filetype=perl ts=4 sw=4 sts=4 et:
 use common::sense;
+exit(0);    # FIXME MIGRA
+__END__
 use Test::More;
 use Test::Deep;
 

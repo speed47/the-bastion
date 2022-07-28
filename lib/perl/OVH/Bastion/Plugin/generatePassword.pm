@@ -9,10 +9,11 @@ use OVH::Result;
 use OVH::Bastion;
 
 sub preconditions {
-    my %p = @_;
-    my $fnret = OVH::Bastion::check_args(\%p,
-        mandatory => [qw{ Self size context }],
-        optionalFalseOk => [qw{ group account Account sudo }], # MIGRA FIXME object
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory       => [qw{ Self size context }],
+        optionalFalseOk => [qw{ group account Account sudo }],    # MIGRA FIXME object
     );
     $fnret or return $fnret;
 
@@ -45,7 +46,7 @@ sub preconditions {
         $fnret or return $fnret;
 
         $passhome = $Account->passHome;
-        $base     = "$passhome/".$Account->sysUser;
+        $base     = "$passhome/" . $Account->sysUser;
     }
     else {
         return R('ERR_INVALID_PARAMETER', msg => "Expected a context 'group' or 'account'");
@@ -64,7 +65,7 @@ sub preconditions {
         $fnret or return R('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $Self");
     }
     elsif ($p{'context'} eq 'group') {
-        $fnret = OVH::Bastion::is_group_owner(account => $Self->sysUser, group => $shortGroup, superowner => 1, sudo => $p{'sudo'});
+        $fnret = OVH::Bastion::is_group_owner(account => $Self->sysUser, group => $shortGroup, superowner => 1);
         $fnret or return R('ERR_NOT_ALLOWED', msg => "You're not a group owner of $shortGroup, dear $Self");
     }
 
@@ -90,7 +91,7 @@ sub act {
     $fnret or return $fnret;
 
     my %values = %{$fnret->value()};
-    my          ( $Self,$Account,$shortGroup,$group,$size,$context,$passhome,$base) =
+    my ($Self, $Account, $shortGroup, $group, $size, $context, $passhome, $base) =
       @values{qw{  Self  Account  shortGroup  group  size  context  passhome  base }};
 
     my $pass;
@@ -186,7 +187,15 @@ sub act {
         osh_warn "Couldn't create metadata file, proceeding anyway";
     }
 
-    return R('OK', value => {context => $context, group => $shortGroup, account => ($Account ? $Account->name : undef), hashes => $hashes});
+    return R(
+        'OK',
+        value => {
+            context => $context,
+            group   => $shortGroup,
+            account => ($Account ? $Account->name : undef),
+            hashes  => $hashes
+        }
+    );
 }
 
 1;

@@ -5,6 +5,7 @@ use common::sense;
 
 use File::Temp;
 use Fcntl qw{ :mode :DEFAULT };
+use Hash::Util qw{ lock_ref_value unlock_ref_value };
 
 sub has_piv_helper {
     my $fnret;
@@ -421,6 +422,9 @@ sub is_valid_public_key {
         $fnret = OVH::Bastion::get_ssh_pub_key_info(pubKey => $pubKey, noexec => $noexec, way => $way);
     }
 
+    unlock_ref_value($fnret, 'msg');
+    unlock_ref_value($fnret, 'err');
+
     if ($fnret->err eq 'KO_PRIVATE_KEY') {
 
         # n00b check
@@ -469,6 +473,9 @@ EOS
             # ok :)
         }
     }
+
+    lock_ref_value($fnret, 'msg');
+    lock_ref_value($fnret, 'err');
 
     return $fnret;
 }
@@ -759,7 +766,7 @@ sub print_public_key {
             $key->{'typecode'}, $key->{'base64'}, $key->{'comment'});
     }
 
-    if ($key->{'info'}) {
+    if (exists $key->{'info'} && $key->{'info'}) {
         my $info = $key->{'info'};
 
         # parse data from 'info' and print it nicely
@@ -784,7 +791,7 @@ sub print_public_key {
         );
     }
 
-    if ($key->{'isPiv'}) {
+    if (exists $key->{'isPiv'} && $key->{'isPiv'}) {
         osh_info(
             Term::ANSIColor::colored(
                 "PIV: "

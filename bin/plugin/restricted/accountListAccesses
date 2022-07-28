@@ -46,11 +46,10 @@ if (not $account) {
     osh_exit 'ERR_MISSING_PARAMETER', "missing mandatory parameter account";
 }
 
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret or osh_exit $fnret;
-$account = $fnret->value->{'account'};
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or osh_exit($Account);
 
-$fnret = OVH::Bastion::get_acls(account => $account);
+$fnret = OVH::Bastion::get_acls(account => $Account->name);
 $fnret or osh_exit $fnret;
 
 if (!$Self->isAuditor) {

@@ -227,7 +227,6 @@ foreach my $todo (@todoList) {
         group          => $shortGroup,
         action         => $todo->{'action'},
         role           => $todo->{'role'},
-        sudo           => 1,
         silentoverride => 1
     );
     $fnret or HEXIT($fnret);

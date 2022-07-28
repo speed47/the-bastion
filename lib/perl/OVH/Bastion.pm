@@ -5,12 +5,13 @@ use common::sense;
 use Fcntl;
 use POSIX qw(strftime);
 use List::Util qw{ any };
+use Hash::Util qw{ unlock_hashref_recurse };
 
 use File::Basename;
 use lib dirname(__FILE__) . '/..';
 use OVH::Bastion::Account;
 
-our $VERSION = '3.09.00-rc3';
+our $VERSION = '3.99.99-alpha1';
 
 BEGIN {
     # only used by the handler below
@@ -135,137 +136,159 @@ use constant {
 # for i in *.inc ; do bz=$(basename $i .inc) ; echo "$bz => "'[qw{ '$(grep ^sub $i | grep -v 'sub _' | awk '{print $2}' | tr "\n" " ")'}],' ; done
 # for i in *.inc ; do bz=$(basename $i .inc) ; printf "$bz => [qw{\n"; grep ^sub $i | grep -v 'sub _' | awk '{print "\t"$2}' | sort; printf "\t}],\n" ; done
 my %_autoload_files = (
-allowdeny => [qw{
-    duration2human
-    get_acls
-    get_acl_way
-    get_group_keys
-    get_ip
-    get_pub_keys_from_directory
-    ip2host
-    is_access_granted
-    is_access_way_granted
-    print_acls
-    ssh_test_access_way
-    }],
-allowkeeper => [qw{
-    access_modify
-    build_re_from_wildcards
-    get_account_list
-    get_group_list
-    get_next_available_uid
-    get_realm_list
-    get_remote_accounts_from_realm
-    is_bastion_account_valid_and_existing
-    is_group_aclkeeper
-    is_group_existing
-    is_group_gatekeeper
-    is_group_guest
-    is_group_member
-    is_group_owner
-    is_user_in_group
-    is_valid_group
-    is_valid_group_and_existing
-    is_valid_ttl
-    is_valid_uid
-    }],
-configuration => [qw{
-    config
-    group_config
-    json_load
-    load_configuration
-    load_configuration_file
-    main_configuration_directory
-    plugin_config
-    }],
-execute => [qw{
-    execute
-    execute_simple
-    helper
-    helper_decapsulate
-    result_from_helper
-    sysret2human
-    }],
-interactive => [qw{
-    interactive
-    }],
-jail => [qw{
-    jailify
-    }],
-log => [qw{
-    info_syslog
-    log_access_get
-    log_access_insert
-    log_access_update
-    syslog
-    syslog_close
-    syslogFormatted
-    warn_syslog
-    }],
-mock => [qw{
-    enable_mocking
-    is_mocking
-    mock_get_account_accesses
-    mock_get_account_entry
-    mock_get_account_guest_accesses
-    mock_get_account_legacy_accesses
-    mock_get_account_personal_accesses
-    mock_get_group_accesses
-    set_mock_data
-    }],
-os => [qw{
-    has_acls
-    is_bsd
-    is_debian
-    is_freebsd
-    is_in_path
-    is_linux
-    is_netbsd
-    is_openbsd
-    is_redhat
-    sys_addmembertogroup
-    sys_changepassword
-    sys_delmemberfromgroup
-    sys_getgr_all
-    sys_getgr_all_cached
-    sys_getgr_name
-    sys_getpasswordinfo
-    sys_getpw_all
-    sys_getpw_all_cached
-    sys_getpw_name
-    sys_getsudoersfolder
-    sys_groupadd
-    sys_groupdel
-    sysinfo
-    sys_neutralizepassword
-    sys_setfacl
-    sys_setpasswordpolicy
-    sys_useradd
-    sys_userdel
-    }],
-password => [qw{
-    get_hashes_from_password
-    get_hashes_list
-    get_password_file
-    is_valid_hash
-    }],
-ssh => [qw{
-    add_key_to_authorized_keys_file
-    generate_ssh_key
-    get_authorized_keys_from_file
-    get_bastion_ips
-    get_from_for_user_key
-    get_ssh_pub_key_info
-    get_supported_ssh_algorithms_list
-    has_piv_helper
-    is_allowed_algo_and_size
-    is_valid_fingerprint
-    is_valid_public_key
-    print_public_key
-    put_authorized_keys_to_file
-    ssh_ingress_keys_piv_apply
-    verify_piv
-    }],
+    allowdeny => [
+        qw{
+          duration2human
+          get_acls
+          get_acl_way
+          get_group_keys
+          get_ip
+          get_pub_keys_from_directory
+          ip2host
+          is_access_granted
+          is_access_way_granted
+          print_acls
+          ssh_test_access_way
+          }
+    ],
+    allowkeeper => [
+        qw{
+          access_modify
+          build_re_from_wildcards
+          get_account_list
+          get_group_list
+          get_next_available_uid
+          get_realm_list
+          get_remote_accounts_from_realm
+          is_bastion_account_valid_and_existing
+          is_group_aclkeeper
+          is_group_existing
+          is_group_gatekeeper
+          is_group_guest
+          is_group_member
+          is_group_owner
+          is_user_in_group
+          is_valid_group
+          is_valid_group_and_existing
+          is_valid_ttl
+          is_valid_uid
+          }
+    ],
+    configuration => [
+        qw{
+          config
+          group_config
+          json_load
+          load_configuration
+          load_configuration_file
+          main_configuration_directory
+          plugin_config
+          }
+    ],
+    execute => [
+        qw{
+          execute
+          execute_simple
+          helper
+          helper_decapsulate
+          result_from_helper
+          sysret2human
+          }
+    ],
+    interactive => [
+        qw{
+          interactive
+          }
+    ],
+    jail => [
+        qw{
+          jailify
+          }
+    ],
+    log => [
+        qw{
+          info_syslog
+          log_access_get
+          log_access_insert
+          log_access_update
+          syslog
+          syslog_close
+          syslogFormatted
+          warn_syslog
+          }
+    ],
+    mock => [
+        qw{
+          enable_mocking
+          is_mocking
+          mock_get_account_accesses
+          mock_get_account_entry
+          mock_get_account_guest_accesses
+          mock_get_account_legacy_accesses
+          mock_get_account_personal_accesses
+          mock_get_group_accesses
+          set_mock_data
+          }
+    ],
+    os => [
+        qw{
+          has_acls
+          is_bsd
+          is_debian
+          is_freebsd
+          is_in_path
+          is_linux
+          is_netbsd
+          is_openbsd
+          is_redhat
+          sys_addmembertogroup
+          sys_changepassword
+          sys_delmemberfromgroup
+          sys_getgr_all
+          sys_getgr_all_cached
+          sys_getgr_name
+          sys_getpasswordinfo
+          sys_getpw_all
+          sys_getpw_all_cached
+          sys_getpw_name
+          sys_getsudoersfolder
+          sys_groupadd
+          sys_groupdel
+          sysinfo
+          sys_neutralizepassword
+          sys_setfacl
+          sys_setpasswordpolicy
+          sys_useradd
+          sys_userdel
+          }
+    ],
+    password => [
+        qw{
+          get_hashes_from_password
+          get_hashes_list
+          get_password_file
+          is_valid_hash
+          }
+    ],
+    ssh => [
+        qw{
+          add_key_to_authorized_keys_file
+          generate_ssh_key
+          get_authorized_keys_from_file
+          get_bastion_ips
+          get_from_for_user_key
+          get_ssh_pub_key_info
+          get_supported_ssh_algorithms_list
+          has_piv_helper
+          is_allowed_algo_and_size
+          is_valid_fingerprint
+          is_valid_public_key
+          print_public_key
+          put_authorized_keys_to_file
+          ssh_ingress_keys_piv_apply
+          verify_piv
+          }
+    ],
 );
 
 sub AUTOLOAD {    ## no critic (AutoLoading)
@@ -301,6 +324,8 @@ sub json_output {    ## no critic (ArgUnpacking)
     if ($ENV{'PLUGIN_JSON'} eq 'PRETTY' and not $force_default) {
         $JsonObject->pretty(1);
     }
+    # apparently ->encode wants to modify $R, it's ok to unlock, here
+    unlock_hashref_recurse($R);
     my $encoded_json =
       $JsonObject->encode({error_code => $R->err, error_message => $R->msg, command => $command, value => $R->value});
 
@@ -824,10 +849,10 @@ sub build_ttyrec_cmdline_part1of2 {
     my $Account = $params{'Account'};
 
     if ($Account) {
-        $params{'account'} = $Account->name; # FIXME TMP MIGRA
-        $params{'remoteaccount'} = $Account->remoteName; # FIXME TMP MIGRA
-        $params{'realm'} = $Account->realm; # FIXME TMP MIGRA
-        $params{'home'} = $Account->home;
+        $params{'account'}       = $Account->name;          # FIXME TMP MIGRA
+        $params{'remoteaccount'} = $Account->remoteName;    # FIXME TMP MIGRA
+        $params{'realm'}         = $Account->realm;         # FIXME TMP MIGRA
+        $params{'home'}          = $Account->home;
     }
 
     # build ttyrec filename format
@@ -926,6 +951,7 @@ sub build_ttyrec_cmdline_part2of2 {
     my $ttyrecAdditionalParameters = OVH::Bastion::config('ttyrecAdditionalParameters')->value;
     push @cmd, @$ttyrecAdditionalParameters if @$ttyrecAdditionalParameters;
 
+    unlock_hashref_recurse($input);
     $input->{'cmd'} = \@cmd;
     return R('OK', value => $input);
 }
@@ -1010,11 +1036,18 @@ sub check_args {
     my @errorMissing;
     my @errorFalse;
 
-    my $callerStack = (caller(1))[3];
+    my $callerStack = sprintf("%s[%s]", (caller(1))[3], (caller(1))[2]);
     my $i           = 2;
     while (caller($i)) {
+        if ($i > 200) {
+            # as we're being called by a bunch of different funcs, let's take this opportunity to
+            # implement a basic anti-infinite loop.
+            # if the stack has more than 200 calls, we clearly have a problem
+            die("Possible infinite loop detected, aborting");
+        }
         my $func = (caller($i))[3];
-        $callerStack .= " < $func" if $func !~ m{^Memoize};
+        my $line = (caller($i))[2];
+        $callerStack .= " < $func\[$line\]" if $func !~ m{^Memoize};
         $i++;
     }
 
@@ -1037,8 +1070,11 @@ sub check_args {
 
     # log verbose info in logs
     warn_syslog(
-        sprintf("check_args: mandatory parameters '@errorMissing' missing in call to '%s' by '%s'", $callerStack, $0))
-      if @errorMissing;
+        sprintf(
+            "check_args: mandatory parameters '@errorMissing' missing in call to '%s' by '%s[%s]'",
+            $callerStack, $0, (caller(0))[2]
+        )
+    ) if @errorMissing;
     warn_syslog(sprintf("check_args: unknown parameters '@errorUnknown' in func '%s' by '%s'", $callerStack, $0))
       if @errorUnknown;
     warn_syslog(sprintf("check_args: false value for parameters '@errorFalse' in func '%s' by '%s'", $callerStack, $0))

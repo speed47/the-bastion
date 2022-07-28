@@ -24,14 +24,6 @@ Usage: --osh SCRIPT_NAME --realm REALM
 EOF
 );
 
-#
-# code
-#
-my $fnret;
-
-#
-# params check
-#
 if (!$realm) {
     help();
     osh_exit 'ERR_MISSING_PARAMETER', "Missing 'realm' parameter";

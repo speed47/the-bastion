@@ -561,7 +561,8 @@ sub load_configuration {
                 else {
                     my $fnret = $Account->isExisting(ignoreConfig => 1);
                     if (!$fnret) {
-                        push @errors, "Configuration error: specified $conf '$account' is not a valid account, ignoring";
+                        push @errors,
+                          "Configuration error: specified $conf '$account' is not a valid account, ignoring";
                     }
                     else {
                         push @validAccounts, $Account->name;
@@ -879,7 +880,7 @@ sub json_load {
         return R('KO_INVALID_JSON', msg => "Error while trying to decode JSON configuration from file: $@");
     }
 
-    return R('OK', value => $configuration);
+    return R('OK', value => $configuration, noLock => 1);
 }
 
 1;

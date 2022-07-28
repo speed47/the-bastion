@@ -50,14 +50,13 @@ if (!$account) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing mandatory parameter 'account'";
 }
 
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, localOnly => 1);
-$fnret or osh_exit $fnret;
-$account = $fnret->value->{'account'};
+my $Account = OVH::Bastion::Account->newFromName($account, type => "local", check => 1);
+$Account or osh_exit($Account);
 
 my @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountModifyCommand';
 push @command, '--action', 'grant';
 push @command, '--command', $command;
-push @command, '--account', $account;
+push @command, '--account', $Account->name;
 
 osh_exit OVH::Bastion::helper(cmd => \@command);

@@ -9,9 +9,6 @@ use OVH::Result;
 use OVH::Bastion;
 use OVH::Bastion::Plugin qw( :DEFAULT help );
 
-# globally allow sys_getpw* and sys_getgr* cache use
-$ENV{'PW_GR_CACHE'} = 1;
-
 my $remainingOptions = OVH::Bastion::Plugin::begin(
     argv    => \@ARGV,
     header  => "group list",
@@ -42,7 +39,7 @@ my $fnret;
 $fnret = OVH::Bastion::get_group_list();
 $fnret or osh_exit $fnret;
 
-my @groupList = keys %{ $fnret->value || {} };
+my @groupList = keys %{$fnret->value || {}};
 
 my $includere = OVH::Bastion::build_re_from_wildcards(wildcards => \@includes, implicit_contains => 1)->value;
 my $excludere = OVH::Bastion::build_re_from_wildcards(wildcards => \@excludes, implicit_contains => 1)->value;
@@ -50,7 +47,7 @@ my $excludere = OVH::Bastion::build_re_from_wildcards(wildcards => \@excludes, i
 $fnret = $Self->getGroups();
 $fnret or osh_exit $fnret;
 
-my %ownGroups = %{ $fnret->value || {} };
+my %ownGroups = %{$fnret->value || {}};
 
 my $result_hash = {};
 foreach my $name (@groupList) {

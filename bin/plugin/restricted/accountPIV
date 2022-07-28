@@ -57,9 +57,8 @@ if (!$account) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing mandatory parameter 'account'";
 }
 
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, localOnly => 1);
-$fnret or osh_exit $fnret;
-$account = $fnret->value->{'account'};
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or osh_exit($Account);
 
 if (not grep { $policy eq $_ } qw{ default enforce never grace }) {
     help();
@@ -84,7 +83,7 @@ osh_info "Changing account configuration...";
 @command = qw{ sudo -n -u allowkeeper -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountPIV';
 push @command, '--step', '1';
-push @command, '--account', $account;
+push @command, '--account', $Account->name;
 push @command, '--policy', $policy;
 push @command, '--ttl', $ttl if defined $ttl;
 
@@ -95,11 +94,11 @@ osh_info $fnret->msg;
 osh_info "Applying change to keys...";
 
 @command = qw{ sudo -n -u };
-push @command, $account;
+push @command, $Account->sysUser;
 push @command, qw{ -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountPIV';
 push @command, '--step', '2';
-push @command, '--account', $account;
+push @command, '--account', $Account->name;
 push @command, '--policy', $policy;
 push @command, '--ttl', $ttl if defined $ttl;
 

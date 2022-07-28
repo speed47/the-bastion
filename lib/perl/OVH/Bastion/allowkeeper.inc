@@ -8,49 +8,53 @@ use Time::Piece;    # $t->strftime
 use Carp;
 use List::Util qw{ any none };
 
-sub is_bastion_account_valid_and_existing { # FIXME kill me after MIGRA
+sub is_bastion_account_valid_and_existing {    # FIXME kill me after MIGRA
     my %params = @_;
-    my $A =OVH::Bastion::Account->newFromName($params{'account'}, check => 1);
+    my $A      = OVH::Bastion::Account->newFromName($params{'account'}, check => 1);
     $A or return $A;
-    return R('OK', value => { account => $A->name, sysaccount=>$A->sysUser, remoteaccount=>$A->remoteName, realm =>$A->realm, home => $A->home});
+    return R(
+        'OK',
+        value => {
+            account       => $A->name,
+            sysaccount    => $A->sysUser,
+            remoteaccount => $A->remoteName,
+            realm         => $A->realm,
+            home          => $A->home
+        }
+    );
 }
 
 # Check if a system user belongs to a specific system group
 sub is_user_in_group {
-    my %params = @_;
-    my $group  = $params{'group'};
-    my $user   = $params{'user'} || OVH::Bastion::get_user_from_env()->value;
-    my $cache  = $params{'cache'};                                              # allow cache use of sys_getgr_name()
-
-    # mandatory keys
-    if (!$user || !$group) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'user' or 'group'");
-    }
-
-    my $fnret = OVH::Bastion::sys_getgr_name(name => $group, cache => $cache);
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p, mandatory => [qw{ group user }]);
     $fnret or return $fnret;
 
-    if (grep { $user eq $_ } @{$fnret->value->{'members'} || []}) {
-        return R('OK', value => {group => $group, account => $user});
+    $fnret = OVH::Bastion::sys_getgr_name(name => $p{'group'});
+    $fnret or return $fnret;
+
+    if (grep { $p{'user'} eq $_ } @{$fnret->value->{'members'} || []}) {
+        return R('OK', value => {group => $p{'group'}, account => $p{'user'}});
     }
     else {
-        return R('KO_NOT_IN_GROUP', msg => "Account $user doesn't belong to the group $group");
+        return R('KO_NOT_IN_GROUP', msg => "Account " . $p{'user'} . " doesn't belong to the group " . $p{'group'});
     }
 }
 
 # does this system group exist? if it happens to be mapped to a bastion group,
 # also return the corresponding "shortGroup" (with the "key" prefix removed)
 sub is_group_existing {
-    my %params              = @_;
-    my $group               = $params{'group'};
-    my $cache               = $params{'cache'};                 # allow cache use of sys_getgr_name()
-    my $user_friendly_error = $params{'user_friendly_error'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory => [qw{ group }],
+        optional  => [qw{ groupType user_friendly_error }],
+    );
+    $fnret or return $fnret;
 
-    if (!$group) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'group'");
-    }
+    my $group = $p{'group'};
 
-    my $fnret = OVH::Bastion::sys_getgr_name(name => $group, cache => $cache);
+    $fnret = OVH::Bastion::sys_getgr_name(name => $group);
 
     if ($fnret) {
         my (undef, $shortGroup) = $group =~ m{^(key)?(.+)};
@@ -67,7 +71,7 @@ sub is_group_existing {
     }
 
     # build a user-compatible error message if asked to, as it can make its way through osh_exit()
-    if ($user_friendly_error) {
+    if ($p{'user_friendly_error'}) {    # FIXME remove this ugly thing
         $group =~ s/^key//;
         return R('KO_GROUP_NOT_FOUND',
             msg => "The bastion group '$group' doesn't exist.\n"
@@ -78,9 +82,11 @@ sub is_group_existing {
 
 # validate uid/gid
 sub is_valid_uid {
-    my %params = @_;
-    my $uid    = $params{'uid'};
-    my $type   = $params{'type'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p, mandatory => [qw{ uid type }]);
+    $fnret or return $fnret;
+
+    my ($uid, $type) = ($p{'uid'}, $p{'type'});
 
     # Basic input validation
     if ($uid !~ m/^\d+$/) {
@@ -92,7 +98,7 @@ sub is_valid_uid {
     }
 
     # Input validation against configuration
-    my $fnret = OVH::Bastion::load_configuration();
+    $fnret = OVH::Bastion::load_configuration();
     $fnret or return $fnret;
 
     my ($accountUidMin, $accountUidMax, $ttyrecGroupIdOffset) =
@@ -121,13 +127,15 @@ sub is_valid_uid {
 }
 
 sub get_next_available_uid {
-    my %params = @_;
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p, optionalFalseOk => [qw{ available_gid available_gid_ttyrec }]);
+    $fnret or return $fnret;
 
     # if true, also check for the availability of the corresponding GID:
-    my $available_gid = $params{'available_gid'};
+    my $available_gid = $p{'available_gid'};
 
     # if true, also check for the availability of the corresponding GID + the ttyrec offset:
-    my $available_gid_ttyrec = $params{'available_gid_ttyrec'};
+    my $available_gid_ttyrec = $p{'available_gid_ttyrec'};
 
     my $higher = OVH::Bastion::config('accountUidMax')->value();
     my $lower  = OVH::Bastion::config('accountUidMin')->value();
@@ -163,8 +171,9 @@ sub get_next_available_uid {
 
 # all ACL modifications (on groups, on accounts, including group-guests) are handled here
 sub access_modify {
-    my %params = @_;
-    my $fnret = OVH::Bastion::check_args(\%params,
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
         # action: add or del
         # ip: can be a single ip or prefix
         # way: group, groupguest, personal
@@ -178,21 +187,21 @@ sub access_modify {
     );
     $fnret or return $fnret;
 
-    my $action = $params{'action'};                                              # add or del
+    my $action = $p{'action'};    # add or del
 
-    my $user = $params{'user'};    # if undef, means a user-wildcard access
-    my $ip   = $params{'ip'};      # can be a single ip or prefix
-    my $port = $params{'port'};    # if undef, means a port-wildcard access
+    my $user = $p{'user'};        # if undef, means a user-wildcard access
+    my $ip   = $p{'ip'};          # can be a single ip or prefix
+    my $port = $p{'port'};        # if undef, means a port-wildcard access
 
-    my $ttl     = $params{'ttl'};
-    my $comment = $params{'comment'};
+    my $ttl     = $p{'ttl'};
+    my $comment = $p{'comment'};
 
-    my $way     = $params{'way'};        # group, groupguest, personal
-    my $group   = $params{'group'};      # only for way=group or way=groupguest
-    my $Account = $params{'Account'};    # only for way=personal
+    my $way     = $p{'way'};        # group, groupguest, personal
+    my $group   = $p{'group'};      # only for way=group or way=groupguest
+    my $Account = $p{'Account'};    # only for way=personal
 
-    my $forceKey      = $params{'forceKey'};
-    my $forcePassword = $params{'forcePassword'};
+    my $forceKey      = $p{'forceKey'};
+    my $forcePassword = $p{'forcePassword'};
 
     # due to how plugins work, sometimes user and port are just '', make them undef in those cases
     undef $user if (defined $user && $user eq '');
@@ -200,7 +209,7 @@ sub access_modify {
 
     # check way
     if ($way eq 'personal') {
-        return R('ERR_INVALID_PARAMETER', msg => "Group parameter specified with way=personal") if defined $group;
+        return R('ERR_INVALID_PARAMETER', msg => "Group parameter specified with way=personal")   if defined $group;
         return R('ERR_MISSING_PARAMETER', msg => "Account parameter mandatory with way=personal") if !$Account;
     }
     elsif ($way eq 'group') {
@@ -290,7 +299,7 @@ sub access_modify {
     my ($requester)  = $ENV{'SUDO_USER'} =~ /([0-9a-zA-Z_.-]+)/;
 
     # requester can never be a realm_* account, because it's shared and should not be able to add access to anything
-    my $RequesterAccount = OVH::Bastion::Account->newFromName($requester, check => 1); # FIXME is this root sometimes?
+    my $RequesterAccount = OVH::Bastion::Account->newFromName($requester, check => 1);   # FIXME is this root sometimes?
     $fnret = $RequesterAccount->check();
     $fnret or return $fnret;
 
@@ -309,7 +318,6 @@ sub access_modify {
               OVH::Bastion::is_user_in_group(
                 user  => $RequesterAccount->sysUser,
                 group => 'osh-self' . ucfirst($action) . 'PersonalAccess',
-                sudo  => 1
               );
         }
 
@@ -318,17 +326,24 @@ sub access_modify {
           OVH::Bastion::is_user_in_group(
             user  => $RequesterAccount->sysUser,
             group => 'osh-account' . ucfirst($action) . 'PersonalAccess',
-            sudo  => 1
           );
     }
     elsif ($way eq 'group') {
         $expected_running_as = $group;
         push @one_should_succeed,
-          OVH::Bastion::is_group_aclkeeper(account => $RequesterAccount->sysUser, group => $shortGroup, superowner => 1, sudo => 1);
+          OVH::Bastion::is_group_aclkeeper(
+            account    => $RequesterAccount->sysUser,
+            group      => $shortGroup,
+            superowner => 1
+          );
     }
     elsif ($way eq 'groupguest') {
         push @one_should_succeed,
-          OVH::Bastion::is_group_gatekeeper(account => $RequesterAccount->sysUser, group => $shortGroup, superowner => 1, sudo => 1);
+          OVH::Bastion::is_group_gatekeeper(
+            account    => $RequesterAccount->sysUser,
+            group      => $shortGroup,
+            superowner => 1
+          );
     }
 
     if ($running_as ne $expected_running_as) {
@@ -338,7 +353,7 @@ sub access_modify {
 
     if (grep({ $_ } @one_should_succeed) == 0 && !$RequesterAccount->isLocalRoot) {
         warn_syslog("Security violation: requesting user '$RequesterAccount' doesn't have the right to do that "
-            . "(way=$way, group="
+              . "(way=$way, group="
               . ($shortGroup ? '<u>' : $shortGroup)
               . ")");
         return R('ERR_SECURITY_VIOLATION', msg => "You're not allowed to do that");
@@ -346,15 +361,15 @@ sub access_modify {
 
     # now, check if the access we're being asked to change is already in place or not
     osh_debug("for action $action of $user\@$ip:$port of way $way with account=$Account and group=$group "
-        ."requested by $RequesterAccount, checking if already granted");
+          . "requested by $RequesterAccount, checking if already granted");
     $fnret = OVH::Bastion::is_access_way_granted(
-        user       => $user,
-        ip         => $ip,
-        port       => $port,
-        way        => $way,
-        group      => $shortGroup,
-        account    => $Account ? $Account->name : undef,
-        exactMatch => 1,             # we're checking if the exact right we're asked to modify exists or not
+        user    => $user,
+        ip      => $ip,
+        port    => $port,
+        way     => $way,
+        group   => $shortGroup,
+        account => $Account ? $Account->name : undef,
+        exactMatch => 1,    # we're checking if the exact right we're asked to modify exists or not
     );
     osh_debug("... result is $fnret");
 
@@ -476,17 +491,17 @@ sub access_modify {
             severity => 'info',
             type     => 'acl',
             fields   => [
-                ['action',         $params{'action'}],
-                ['type',           $params{'way'}],
+                ['action',         $p{'action'}],
+                ['type',           $p{'way'}],
                 ['group',          $shortGroup],
-                ['account',        $params{'account'}],
-                ['user',           $params{'user'}],
-                ['ip',             $params{'ip'}],
-                ['port',           $params{'port'}],
-                ['ttl',            $params{'ttl'}],
-                ['force_key',      $params{'forceKey'}],
-                ['force_password', $params{'forcePassword'}],
-                ['comment',        $params{'comment'}],
+                ['account',        $p{'account'}],
+                ['user',           $p{'user'}],
+                ['ip',             $p{'ip'}],
+                ['port',           $p{'port'}],
+                ['ttl',            $p{'ttl'}],
+                ['force_key',      $p{'forceKey'}],
+                ['force_password', $p{'forcePassword'}],
+                ['comment',        $p{'comment'}],
             ]
         );
         return R('OK', msg => $returnmsg) if $returnmsg;
@@ -494,17 +509,18 @@ sub access_modify {
     };    # end of sub definition
 
     # then call the sub we just defined
-    delete $params{'file'};
+    delete $p{'file'};
     my $ret;
-    my $prefix = ($Account && $Account->remoteName) ? "allowed_".$Account->remoteName : "allowed";
+    my $prefix = ($Account && $Account->remoteName) ? "allowed_" . $Account->remoteName : "allowed";
     if ($way eq 'personal') {
-        $ret = $_access_modify_file->(%params, file => $Account->allowedPrivateFile);
+        $ret = $_access_modify_file->(%p, file => $Account->allowedPrivateFile);
     }
     elsif ($way eq 'group') {
-        $ret = $_access_modify_file->(%params, file => "/home/$group/allowed.ip");
+        $ret = $_access_modify_file->(%p, file => "/home/$group/allowed.ip");
     }
     elsif ($way eq 'groupguest') {
-        $ret = $_access_modify_file->(%params, file => "/home/allowkeeper/".$Account->sysUser."/$prefix.partial.$shortGroup");
+        $ret =
+          $_access_modify_file->(%p, file => "/home/allowkeeper/" . $Account->sysUser . "/$prefix.partial.$shortGroup");
     }
     osh_debug("_access_modify_file() said $ret");
     return $ret if defined $ret;
@@ -514,9 +530,16 @@ sub access_modify {
 
 # Check that a group is valid or not (syntax)
 sub is_valid_group {
-    my %params    = @_;
-    my $group     = $params{'group'};
-    my $groupType = $params{'groupType'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory => [qw{ group }],
+        optional  => [qw{ groupType }],
+    );
+    $fnret or return $fnret;
+
+    my $group     = $p{'group'};
+    my $groupType = $p{'groupType'};
 
     # possible groupTypes:
     # osh: osh-accountList
@@ -526,10 +549,6 @@ sub is_valid_group {
     # aclkeeper: keymygroup-aclkeeper
     # owner: keymygroup-owner
     # regular: no check appart from the length and forbidden prefixes/suffixes
-
-    if (!$group) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'group'");
-    }
 
     # autodetect if my caller prefixed the group name with 'key' or not, and adjust accordingly.
     # we'll return normalized group and shortGroup values to our caller
@@ -599,13 +618,14 @@ sub is_valid_group_and_existing {
 
 # return the list of the bastion groups (i.e. not the system group list)
 sub get_group_list {
-    my %params = @_;
-    my $cache  = $params{'cache'};    # allow cache use of sys_getgr_all()
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p);
+    $fnret or return $fnret;
 
     # we loop through all the system groups and only retain those starting
     # with "key", and not finishing in -owner, -gatekeeper or -aclkeeper.
     # we also exclude special builtin groups (keykeeper and keyreader)
-    my $fnret = OVH::Bastion::sys_getgr_all(cache => $cache);
+    $fnret = OVH::Bastion::sys_getgr_all();
     $fnret or return $fnret;
 
     my %groups;
@@ -624,51 +644,34 @@ sub get_group_list {
 
 # return the list of bastion accounts (i.e. not the system user list)
 sub get_account_list {
-    my %params   = @_;
-    my $accounts = $params{'accounts'} || [];
-    my $cache    = $params{'cache'};            # allow cache use of sys_getpw_all()
-                                                # note that is_bastion_account_valid_and_existing() passthroughs its
-                                                # $cache param to sys_getpw_name() too
-    my $wantObject = $params{'wantObject'};
-    my $fast = $params{'fast'}; # don't call ->isExisting() on each account (uid/gid will NOT be set)
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        optional        => [qw{ accounts }],
+        optionalFalseOk => [qw{ fast }],
+    );
+    $fnret or return $fnret;
+
+    my $accounts = $p{'accounts'} || [];
+    my $fast     = $p{'fast'};             # don't call ->isExisting() on each account (uid/gid will NOT be set)
 
     # we loop through all the accounts known to the OS
-    my $fnret = OVH::Bastion::sys_getpw_all(cache => $cache);
+    $fnret = OVH::Bastion::sys_getpw_all();
     $fnret or return $fnret;
 
     my %users;
     foreach my $name (keys %{$fnret->value}) {
-
         # if $accounts has been specified, only consider those
-        next if (@$accounts && !grep { $name eq $_ } @$accounts);
+        next if (@$accounts && none { $name eq $_ } @$accounts);
 
-        if (!$wantObject) {
-            # skip invalid accounts.
-            # if !$cache, then we've filled the cache with sys_getpw_all() just above,
-            # so it's OK to actually use it in all cases
-            next if not OVH::Bastion::is_bastion_account_valid_and_existing(account => $name, cache => 1);
+        my $Account = OVH::Bastion::Account->newFromName($name);
+        next if !$Account;
 
-            my $entry = $fnret->value->{$name};
-
-            # add proper accounts, only include a subset of the fields we got
-            $users{$name} = {
-                name  => $entry->{'name'},
-                gid   => $entry->{'gid'},
-                home  => $entry->{'home'},
-                shell => $entry->{'shell'},
-                uid   => $entry->{'uid'}
-            };
+        if ($fast) {
+            $users{$name} = $Account;
         }
         else {
-            my $Account = OVH::Bastion::Account->newFromName($name);
-            next if !$Account;
-
-            if ($fast) {
-                $users{$name} = $Account;
-            }
-            else {
-                $users{$name} = $Account if $Account->isExisting();
-            }
+            $users{$name} = $Account if $Account->isExisting();
         }
     }
 
@@ -676,34 +679,27 @@ sub get_account_list {
 }
 
 sub get_realm_list {
-    my %params = @_;
-    my $realms = $params{'realms'} || [];
-    my $cache  = $params{'cache'};          # allow cache use of sys_getent_pw()
-                                            # note that is_bastion_account_valid_and_existing() passthroughs its
-                                            # $cache param to sys_getent_pw() too
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p, optional => [qw{ realms }],);
+    $fnret or return $fnret;
+
+    my $realms = $p{'realms'} || [];
 
     # we loop through all the accounts known to the OS
-    my $fnret = OVH::Bastion::sys_getpw_all(cache => $cache);
+    $fnret = OVH::Bastion::sys_getpw_all();
     $fnret or return $fnret;
 
     my %users;
     foreach my $name (keys %{$fnret->value}) {
-
         # if $realms has been specified, only consider those
-        next if (@$realms && !grep { $name eq "realm_$_" } @$realms);
+        next if (@$realms && none { $name eq "realm_$_" } @$realms);
 
         # skip invalid realms.
-        # if !$cache, then we've filled the cache with sys_getpw_all() just above,
-        # so it's OK to actually use it in all cases
-        next
-          if !OVH::Bastion::is_bastion_account_valid_and_existing(
-            account     => $name,
-            accountType => "realm",
-            cache       => 1
-          );
+        my $RealmSupportAccount = OVH::Bastion::Account->newFromName($name, type => "realm", check => 1);
+        next if !$RealmSupportAccount;
 
         # add proper realms
-        $name =~ s{^realm_}{};
+        $name = $RealmSupportAccount->realm;
         $users{$name} = {name => $name};
     }
 
@@ -712,22 +708,18 @@ sub get_realm_list {
 
 # used by funcs below
 sub _has_group_role {
-    my %params     = @_;
-    my $account    = $params{'account'};
-    my $shortGroup = $params{'group'};
-    my $role       = $params{'role'};          # regular or gatekeeper or owner
-    my $superowner = $params{'superowner'};    # allow superowner (will always return yes if so)
-    my $sudo       = $params{'sudo'};          # are we run under sudo ?
-    my $cache      = $params{'cache'};         # allow cache use of sys_getgr_name() through is_user_in_group() and
-                                               # is_bastion_account_valid_and_existing()
-    my $fnret;
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory       => [qw{ account group role }],
+        optionalFalseOk => [qw{ superowner }],
+    );
+    $fnret or return $fnret;
 
-    if (not $account) {
-        $account = $sudo ? $ENV{'SUDO_USER'} : OVH::Bastion::get_user_from_env()->value;
-    }
-    if (not $account) {
-        return R('ERR_MISSING_PARAMETER', msg => 'Expected parameter account');
-    }
+    my $account    = $p{'account'};
+    my $shortGroup = $p{'group'};
+    my $role       = $p{'role'};          # regular or gatekeeper or owner
+    my $superowner = $p{'superowner'};    # allow superowner (will always return yes if so)
 
     my $group = "key$shortGroup";
 
@@ -745,11 +737,14 @@ sub _has_group_role {
 
     my $sysaccount = $Account->sysUser;
 
-    $fnret = OVH::Bastion::is_user_in_group(user => $sysaccount, group => $group, cache => $cache);
+    $fnret = OVH::Bastion::is_user_in_group(user => $sysaccount, group => $group);
     osh_debug("is <$sysaccount> in <$group> ? => " . ($fnret ? 'yes' : 'no'));
     if ($fnret) {
-        $fnret->{'value'} = {account => $account, sysaccount => $sysaccount};
-        return $fnret;
+        return R(
+            $fnret->err,
+            msg   => $fnret->msg,
+            value => {account => $account, sysaccount => $sysaccount, superowner => 0}
+        );
     }
 
     # if superowner allowed, try it
@@ -761,7 +756,13 @@ sub _has_group_role {
     }
 
     # not admin or no superowner allowed... return is_user_in_group status but fixup the value if true
-    $fnret->{'value'} = {account => $account, sysaccount => $sysaccount} if $fnret;
+    if ($fnret) {
+        return R(
+            $fnret->err,
+            msg   => $fnret->msg,
+            value => {account => $account, sysaccount => $sysaccount, superowner => 0}
+        );
+    }
     return $fnret;
 }
 
@@ -784,18 +785,17 @@ sub is_group_owner {
 }
 
 sub _is_group_member_or_guest {
-    my %params     = @_;
-    my $shortGroup = $params{'group'};
-    my $want       = $params{'want'};     # guest or member
-    my $cache      = $params{'cache'};    # allow cache use of sys_getpw_name() through
-                                          # is_bastion_account_valid_and_existing() and sys_getgr_name()
-                                          # through is_valid_group_and_existing()
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p, mandatory => [qw{ group account want }],);
 
-    my $fnret = _has_group_role(%params, role => "regular");
+    my $shortGroup = $p{'group'};
+    my $want       = $p{'want'};    # guest or member
+
+    $fnret = _has_group_role(group => $p{'group'}, account => $p{'account'}, role => "regular");
     $fnret or return $fnret;
 
     my $account = $fnret->value()->{'account'};
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, cache => $cache);
+    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
     $fnret or return $fnret;
 
     $account = $fnret->value->{'account'};
@@ -803,7 +803,7 @@ sub _is_group_member_or_guest {
     my $sysaccount    = $fnret->value->{'sysaccount'};
 
     my $group = "key$shortGroup";
-    $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key", cache => $cache);
+    $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
     $fnret or return $fnret;
     $group      = $fnret->value()->{'group'};
     $shortGroup = $fnret->value()->{'shortGroup'};    # untainted
@@ -825,22 +825,22 @@ sub _is_group_member_or_guest {
 
 # test if account is strictly a guest (i.e. if a member, then answer is no)
 sub is_group_guest {
-    my %params = @_;
-    $params{'want'} = 'guest';
-    return _is_group_member_or_guest(%params);
+    my %p = @_;
+    return _is_group_member_or_guest(want => 'guest', group => $p{'group'}, account => $p{'account'});
 }
 
 # test if account is strictly a member (i.e. if a guest, then answer is no)
 sub is_group_member {
-    my %params = @_;
-    $params{'want'} = 'member';
-    return _is_group_member_or_guest(%params);
+    my %p = @_;
+    return _is_group_member_or_guest(want => 'member', group => $p{'group'}, account => $p{'account'});
 }
 
 sub get_remote_accounts_from_realm {
-    my %params = @_;
-    my $realm  = $params{'realm'};
-    my $cache  = $params{'cache'}; # allow cache use of sys_getpw_name() through is_bastion_account_valid_and_existing()
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p, mandatory => [qw{ realm }],);
+    $fnret or return $fnret;
+
+    my $realm = $p{'realm'};
 
     $realm = "realm_$realm" if $realm !~ /^realm_/;
     my $RealmSupportAccount = OVH::Bastion::Account->newFromName($realm, type => "realm", check => 1);
@@ -859,8 +859,11 @@ sub get_remote_accounts_from_realm {
 }
 
 sub is_valid_ttl {
-    my %params = @_;
-    my $ttl    = $params{'ttl'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p, mandatoryFalseOk => [qw{ ttl }],);
+    $fnret or return $fnret;
+
+    my $ttl = $p{'ttl'};
     my $seconds;
 
     if ($ttl =~ /^\d+$/) {
@@ -884,9 +887,16 @@ sub is_valid_ttl {
 
 # used by groupList and accountList
 sub build_re_from_wildcards {
-    my %params            = @_;
-    my $wildcards         = $params{'wildcards'};
-    my $implicit_contains = $params{'implicit_contains'};
+    my %p     = @_;
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        mandatory       => [qw{ wildcards }],
+        optionalFalseOk => [qw{ implicit_contains }],
+    );
+    $fnret or return $fnret;
+
+    my $wildcards         = $p{'wildcards'};
+    my $implicit_contains = $p{'implicit_contains'};
 
     # to avoid modifying the caller's array
     my @relist = @$wildcards;

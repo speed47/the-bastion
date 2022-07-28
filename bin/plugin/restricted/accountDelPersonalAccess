@@ -34,21 +34,10 @@ Usage: --osh SCRIPT_NAME --account ACCOUNT --host HOST [OPTIONS]
 EOF
 );
 
-my $fnret;
-
 if (!$ip) {
     help();
     osh_exit 'ERR_MISSING_PARAMETER', "Missing parameter 'host' or didn't resolve correctly";
 }
-
-if (not $account) {
-    help();
-    osh_exit 'ERR_MISSING_PARAMETER', "Missing mandatory parameter 'account'";
-}
-
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret or osh_exit $fnret;
-$account = $fnret->value->{'account'};
 
 if ($user and $userAny) {
     help();
@@ -89,11 +78,14 @@ if (not $port and not $portAny) {
     #osh_exit 'ERR_MISSING_PARAMETER', "No port specified, if you want to allow any remote port, use --port-any";
 }
 
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or osh_exit($Account);
+
 my @command = qw{ sudo -n -u allowkeeper -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountModifyPersonalAccess';
 push @command, '--target', 'any';
 push @command, '--action', 'del';
-push @command, '--account', $account;
+push @command, '--account', $Account->name;
 push @command, '--ip', $ip;
 push @command, '--user', $user if $user;
 push @command, '--port', $port if $port;

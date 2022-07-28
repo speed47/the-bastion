@@ -49,12 +49,12 @@ $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType =>
 $fnret or HEXIT($fnret);
 
 $fnret = OVH::Bastion::Plugin::generateEgressKey::preconditions(
-    context => 'group',
-    self    => $self,
-    group   => $group,
-    algo    => $algo,
-    size    => $size,
-    sudo    => 1,
+    context  => 'group',
+    Self     => $Self,
+    group    => $group,
+    algo     => $algo,
+    size     => $size,
+    isHelper => 1,
 );
 $fnret or HEXIT($fnret);
 

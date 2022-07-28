@@ -65,16 +65,13 @@ Usage: --osh SCRIPT_NAME --account ACCOUNT [--option value [--option value [...]
 EOF
 );
 
-my $fnret;
-
 if (!$account) {
     help();
     osh_exit 'ERR_MISSING_PARAMETER', "Missing mandatory parameter 'account'";
 }
 
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, localOnly => 1);
-$fnret or osh_exit $fnret;
-$account = $fnret->value->{'account'};
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or osh_exit($Account);
 
 if ((grep { defined } values %modify) == 0) {
     help();
@@ -118,7 +115,7 @@ if ($modify{'max-inactive-days'} && $modify{'max-inactive-days'} !~ /^(?:\d+|-1)
 
 my @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountModify';
-push @command, '--account', $account;
+push @command, '--account', $Account->name;
 foreach my $key (keys %modify) {
     push @command, '--modify', $key . '=' . $modify{$key} if defined $modify{$key};
 }

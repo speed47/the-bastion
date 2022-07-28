@@ -55,7 +55,7 @@ $fnret = OVH::Bastion::Plugin::groupSetRole::preconditions(
     group          => $group,
     action         => $action,
     role           => $role,
-    sudo           => 1,
+    isHelper       => 1,
     silentoverride => 1
 );
 osh_debug("groupSetRole: checking preconditions result: $fnret");
@@ -74,19 +74,19 @@ my $Account = $fnret->value->{'Account'};
 
 #>CODE
 if ($role eq 'owner') {
-    $fnret = OVH::Bastion::is_group_owner(account => $Account->name, group => $shortGroup, sudo => 1);
+    $fnret = OVH::Bastion::is_group_owner(account => $Account->name, group => $shortGroup);
 }
 elsif ($role eq 'gatekeeper') {
-    $fnret = OVH::Bastion::is_group_gatekeeper(account => $Account->name, group => $shortGroup, sudo => 1);
+    $fnret = OVH::Bastion::is_group_gatekeeper(account => $Account->name, group => $shortGroup);
 }
 elsif ($role eq 'aclkeeper') {
-    $fnret = OVH::Bastion::is_group_aclkeeper(account => $Account->name, group => $shortGroup, sudo => 1);
+    $fnret = OVH::Bastion::is_group_aclkeeper(account => $Account->name, group => $shortGroup);
 }
 elsif ($role eq 'member') {
-    $fnret = OVH::Bastion::is_group_member(account => $Account->name, group => $shortGroup, sudo => 1);
+    $fnret = OVH::Bastion::is_group_member(account => $Account->name, group => $shortGroup);
 }
 elsif ($role eq 'guest') {
-    $fnret = OVH::Bastion::is_group_guest(account => $Account->name, group => $shortGroup, sudo => 1);
+    $fnret = OVH::Bastion::is_group_guest(account => $Account->name, group => $shortGroup);
 }
 $fnret->is_err and HEXIT($fnret);
 
@@ -123,7 +123,6 @@ elsif ($action eq 'del') {
                 OVH::Bastion::is_group_member(
                     account => sprintf("%s/%s", $Account->realm, $pRemoteaccount),
                     group   => $shortGroup,
-                    sudo    => 1
                 )
               )
             {

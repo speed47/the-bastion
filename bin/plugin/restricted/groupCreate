@@ -4,6 +4,7 @@ use common::sense;
 use Term::ReadKey;
 use Term::ANSIColor;
 use POSIX qw{ strftime };
+use Hash::Util qw{ unlock_value };
 
 use File::Basename;
 use lib dirname(__FILE__) . '/../../../lib/perl';
@@ -149,6 +150,7 @@ else {
     if ($fnret and $from) {
         foreach my $keyfile (@{$fnret->value->{'sortedKeys'}}) {
             my $key = $fnret->value->{'keys'}{$keyfile};
+            unlock_value(%$key, 'prefix');
             $key->{'prefix'} = $from;
             OVH::Bastion::print_public_key(key => $key);
             $result_hash->{'public_key'} = $key;

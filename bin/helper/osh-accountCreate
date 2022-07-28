@@ -115,7 +115,8 @@ if (defined $maxInactiveDays && $maxInactiveDays < 0) {
 
 #>PARAMS
 $fnret = OVH::Bastion::is_group_existing(group => $Account->ttyGroup);
-$fnret and HEXIT('ERR_TTY_GROUP_ALREADY_EXISTS', msg => "The TTY group for this account (".$Account->ttyGroup.") already exists!");
+$fnret and HEXIT('ERR_TTY_GROUP_ALREADY_EXISTS',
+    msg => "The TTY group for this account (" . $Account->ttyGroup . ") already exists!");
 
 #<PARAMS
 
@@ -177,8 +178,8 @@ $fnret = OVH::Bastion::get_from_for_user_key(
 );
 $fnret or HEXIT($fnret);
 
-my $from    = $fnret->value->{'from'};
-my $ipList  = $fnret->value->{'ipList'};
+my $from   = $fnret->value->{'from'};
+my $ipList = $fnret->value->{'ipList'};
 
 osh_info "Creating group $Account with GID $uid...";
 $fnret = OVH::Bastion::sys_groupadd(noisy_stderr => 1, gid => $uid, group => $Account->sysUser);
@@ -192,7 +193,7 @@ $fnret = OVH::Bastion::sys_useradd(
     noisy_stderr => 1,
     user         => $Account->sysUser,
     uid          => $uid,
-    gid          => $uid, # not a typo
+    gid          => $uid,                                            # not a typo
     shell        => $OVH::Bastion::BASEPATH . '/bin/shell/osh.pl',
     home         => $Account->home
 );
@@ -203,7 +204,7 @@ osh_debug('user created');
 chmod 0750, $Account->home;
 
 my $sshdir = $Account->home . '/.ssh';
-mkdir $sshdir if ! -d $sshdir;
+mkdir $sshdir if !-d $sshdir;
 chmod 0750, $sshdir;
 chown $uid, $uid, $sshdir;
 
@@ -218,19 +219,19 @@ osh_info "Creating tty group of account...";
 $fnret = OVH::Bastion::sys_groupadd(noisy_stderr => 1, group => $Account->ttyGroup, gid => $ttygid);
 $fnret->err eq 'OK'
   or HEXIT('ERR_GROUPADD_FAILED',
-    msg => "Error while running groupadd with UID $ttygid and group ".$Account->ttyGroup." (" . $fnret->msg . ")");
+    msg => "Error while running groupadd with UID $ttygid and group " . $Account->ttyGroup . " (" . $fnret->msg . ")");
 osh_debug('ok, group was created');
 
 $fnret = OVH::Bastion::sys_addmembertogroup(
-    group       => $Account->ttyGroup,
-    user        => $Account->sysUser,
+    group => $Account->ttyGroup,
+    user  => $Account->sysUser,
 );
 $fnret or HEXIT($fnret);
 
 # adding account to bastion-users group
 $fnret = OVH::Bastion::sys_addmembertogroup(
-    group       => "bastion-users",
-    user        => $Account->sysUser,
+    group => "bastion-users",
+    user  => $Account->sysUser,
 );
 $fnret or HEXIT($fnret);
 
@@ -240,7 +241,7 @@ if ($type ne 'realm') {
         foreach my $suppGroup (@{$config->{'accountCreateSupplementaryGroups'}}) {
             $fnret = OVH::Bastion::sys_addmembertogroup(
                 group => $suppGroup,
-                user => $Account->sysUser,
+                user  => $Account->sysUser,
             );
             if ($fnret) {
                 osh_info "Account added to group $suppGroup";
@@ -263,16 +264,22 @@ if (!chmod 0700, $Account->ttyrecHome) {
 
 osh_debug('applying an acl for group ' . $Account->ttyGroup);
 OVH::Bastion::sys_setfacl(target => $Account->ttyrecHome, clear => 1, perms => sprintf("g:%s:rX", $Account->ttyGroup))
-  or HEXIT('ERR_SETFACL_FAILED', msg => "Error setting ACL on ".$Account->ttyrecHome);
+  or HEXIT('ERR_SETFACL_FAILED', msg => "Error setting ACL on " . $Account->ttyrecHome);
 
-OVH::Bastion::sys_setfacl(target => $Account->ttyrecHome, default => 1, perms => sprintf("g:%s:rX", $Account->ttyGroup))
-  or HEXIT('ERR_SETFACL_FAILED', msg => "Error setting default ACL on ".$Account->ttyrecHome);
+OVH::Bastion::sys_setfacl(
+    target  => $Account->ttyrecHome,
+    default => 1,
+    perms   => sprintf("g:%s:rX", $Account->ttyGroup)
+) or HEXIT('ERR_SETFACL_FAILED', msg => "Error setting default ACL on " . $Account->ttyrecHome);
 
-OVH::Bastion::sys_setfacl(target => $Account->home, clear => 1, perms => sprintf("g:%s:x,g:osh-auditor:x", $Account->ttyGroup))
-  or HEXIT('ERR_SETFACL_FAILED', msg => "Error setting ACL on ".$Account->home);
+OVH::Bastion::sys_setfacl(
+    target => $Account->home,
+    clear  => 1,
+    perms  => sprintf("g:%s:x,g:osh-auditor:x", $Account->ttyGroup)
+) or HEXIT('ERR_SETFACL_FAILED', msg => "Error setting ACL on " . $Account->home);
 
 OVH::Bastion::sys_setfacl(target => $Account->sshHome, clear => 1, perms => "g:osh-auditor:x")
-  or HEXIT('ERR_SETFACL_FAILED', msg => "Error setting ACL on ".$Account->sshHome);
+  or HEXIT('ERR_SETFACL_FAILED', msg => "Error setting ACL on " . $Account->sshHome);
 
 osh_info "Creating some more directories...";
 mkdir $Account->allowkeeperHome;
@@ -286,11 +293,7 @@ if ($type eq 'normal') {
 
 osh_info "Applying proper ownerships...";
 $fnret = OVH::Bastion::execute(
-    cmd => [
-        'chown',
-        'allowkeeper:allowkeeper',
-        @entries
-    ],
+    cmd          => ['chown', 'allowkeeper:allowkeeper', @entries],
     noisy_stderr => 1
 );
 $fnret->err eq 'OK'
@@ -300,10 +303,9 @@ $fnret = OVH::Bastion::execute(cmd => ['chmod', '-R', 'o+rX', $Account->allowkee
 $fnret->err eq 'OK'
   or HEXIT('ERR_CHMOD_FAILED', msg => "Error while running chmod -R on allowkeeper (" . $fnret->msg . ")");
 
-# clear $Account cache as we've now created it: is should succesfully pass the ->isExisting check,
-# as long as we also force the pw/gr cache refresh, as it's now obviously invalid
+# clear $Account cache as we've now created it: is should succesfully pass the ->isExisting check
 $Account->refresh();
-$fnret = $Account->isExisting(nocache => 1);
+$fnret = $Account->isExisting();
 $fnret or HEXIT($fnret);
 
 if (ref $config->{'accountCreateDefaultPersonalAccesses'} eq 'ARRAY' && $type eq 'normal') {
@@ -338,7 +340,7 @@ my %metadata      = (
 );
 $fnret = $Account->setConfig("private/creation_info" => encode_json(\%metadata));
 if (!$fnret) {
-    osh_warn("Couldn't set creation_info account metadata (".$fnret->msg."), continuing anyway");
+    osh_warn("Couldn't set creation_info account metadata (" . $fnret->msg . "), continuing anyway");
     warn_syslog("While creating account '$Account', couldn't set creation_info metadata: " . $fnret->msg);
 }
 
@@ -372,8 +374,8 @@ if ($alwaysActive || $type eq 'realm') {
 }
 
 $fnret = OVH::Bastion::sys_addmembertogroup(
-    group       => $Account->sysUser,
-    user        => "keyreader",
+    group => $Account->sysUser,
+    user  => "keyreader",
 );
 $fnret or HEXIT($fnret);
 osh_debug('user keyreader added to group');
@@ -414,7 +416,7 @@ $fnret = OVH::Bastion::generate_ssh_key(
     folder => $Account->sshHome,
     prefix => 'private',
     name   => $Account->name,
-    gid    => $uid, # not a typo
+    gid    => $uid,                                                              # not a typo
     uid    => $uid,
     algo   => OVH::Bastion::config('defaultAccountEgressKeyAlgorithm')->value,
     size   => OVH::Bastion::config('defaultAccountEgressKeySize')->value,

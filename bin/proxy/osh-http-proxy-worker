@@ -108,8 +108,13 @@ if ($monitoring) {
 }
 
 my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
-$Account or log_and_exit(400, "Bad Request (bad account)",
-    "Account name '$account' is invalid (".$Account->msg.")", {comment => "invalid_account"});
+$Account
+  or log_and_exit(
+    400,
+    "Bad Request (bad account)",
+    "Account name '$account' is invalid (" . $Account->msg . ")",
+    {comment => "invalid_account"}
+  );
 
 $log_params{'account'} = $Account->name;
 $log_params{'user'}    = $user;
@@ -251,7 +256,6 @@ $fnret = OVH::Bastion::is_access_granted(
     ip       => $remotemachine,
     port     => $remoteport,
     listOnly => 1,
-    sudo     => 1
 );
 if (not $fnret) {
     log_and_exit(

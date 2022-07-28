@@ -60,7 +60,7 @@ foreach my $item (@toCheck) {
     osh_info "Looking for keys in your known_hosts for $item";
 
     # if the user's known_hosts doesn't exist, it makes ssh-keygen -F very angry
-    if (!-e $Self->home."/.ssh/known_hosts") {
+    if (!-e $Self->home . "/.ssh/known_hosts") {
         osh_ok(R('OK_NO_CHANGE', msg => "Your account didn't have any known_hosts file, nothing to do"));
     }
 

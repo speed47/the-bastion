@@ -36,13 +36,12 @@ if (not $account) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing 'account' parameter";
 }
 
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret or osh_exit $fnret;
-$account = $fnret->value->{'account'};
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or osh_exit($Account);
 
 my @command = qw{ sudo -n -u keyreader -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountListIngressKeys';
-push @command, ('--account', $account);
+push @command, ('--account', $Account->name);
 
 $fnret = OVH::Bastion::helper(cmd => \@command);
 $fnret or osh_exit $fnret;
@@ -59,4 +58,4 @@ if (!@result) {
     osh_info "No ingress keys configured for this account!";
 }
 
-osh_ok({keys => \@result, account => $account});
+osh_ok({keys => \@result, account => $Account->name});

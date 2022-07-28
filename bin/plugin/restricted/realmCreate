@@ -42,10 +42,10 @@ my $fnret;
 # params check
 if (not $realm or not $from) {
     help();
-    osh_exit 'ERR_MISSING_PARAMETER', "Missing mandatory parameter 'realm' or 'from'";
+    osh_exit 'ERR_MISSING_PARAMETER', "Missing mandatory parameter 'realm'($realm) or 'from'($from)";    # FIXME DELME
 }
 
-my $RealmSupportAccount = OVH::Bastion::Account->newFromName("realm_".$realm, type => "realm");
+my $RealmSupportAccount = OVH::Bastion::Account->newFromName("realm_" . $realm, type => "realm");
 $RealmSupportAccount or osh_exit $RealmSupportAccount;
 
 $fnret = $RealmSupportAccount->isExisting;
@@ -87,7 +87,8 @@ $fnret or osh_exit $fnret;
 #
 my @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountCreate';
-push @command, "--type", "realm", "--account", $RealmSupportAccount->name, "--pubKey", $pubKey, "--always-active", "--uid-auto";
+push @command, "--type", "realm", "--account", $RealmSupportAccount->name, "--pubKey", $pubKey, "--always-active",
+  "--uid-auto";
 push @command, "--from",    $from    if $from;
 push @command, "--comment", $comment if $comment;
 

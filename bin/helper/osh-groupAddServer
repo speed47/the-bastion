@@ -71,7 +71,7 @@ if ($self eq 'root') {
     osh_debug "Real root, skipping checks of permissions";
 }
 else {
-    $fnret = OVH::Bastion::is_group_aclkeeper(account => $self, group => $shortGroup, sudo => 1, superowner => 1);
+    $fnret = OVH::Bastion::is_group_aclkeeper(account => $self, group => $shortGroup, superowner => 1);
     $fnret or HEXIT('ERR_NOT_ALLOWED', msg => "Sorry, you must be an aclkeeper of group $shortGroup");
 }
 

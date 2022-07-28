@@ -23,24 +23,19 @@ Usage: --osh SCRIPT_NAME --account ACCOUNT
   --account ACCOUNT  Account to work on
 EOF
 );
-#
-# code
-#
-my $fnret;
+
 if (not $account) {
     help();
     osh_exit 'ERR_MISSING_PARAMETER', "Missing 'account' parameter";
 }
 
-# Here we parse account name
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret
-  or osh_exit $fnret;
-$account = $fnret->value->{'account'};
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or osh_exit($Account);
+
 my @command = qw{ sudo -n -u root -- };
 push @command, qw{ /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountUnlock';
-push @command, ('--account', $account);
+push @command, ('--account', $Account->name);
 osh_exit(
     OVH::Bastion::helper(
         cmd => \@command

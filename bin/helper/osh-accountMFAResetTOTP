@@ -58,7 +58,7 @@ elsif ($Self->name ne $Account->name) {
 #<RIGHTSCHECK
 
 # don't allow a non-admin to reset the TOTP of an admin
-if ($Account->isAdmin(sudo => 1) && !$Self->isAdmin(sudo => 1)) {
+if ($Account->isAdmin() && !$Self->isAdmin()) {
     HEXIT('ERR_SECURITY_VIOLATION', msg => "You can't reset the TOTP of an admin without being admin yourself");
 }
 
@@ -85,7 +85,8 @@ else {
 
 # remove the user from the TOTP configured group
 if (OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP)) {
-    $fnret = OVH::Bastion::sys_delmemberfromgroup(user => $Account->sysUser, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP);
+    $fnret =
+      OVH::Bastion::sys_delmemberfromgroup(user => $Account->sysUser, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP);
     $fnret or HEXIT($fnret);
 }
 

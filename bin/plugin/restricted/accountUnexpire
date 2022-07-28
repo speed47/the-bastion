@@ -37,16 +37,14 @@ if (not $account) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing 'account' parameter";
 }
 
-# Here we parse account name
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret or osh_exit $fnret;
-$account = $fnret->value->{'account'};
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or osh_exit($Account);
 
 my @command = qw{ sudo -n -u };
-push @command, ($account, '--');
+push @command, ($Account->sysUser, '--');
 push @command, qw{ /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountUnexpire';
-push @command, ('--account', $account);
+push @command, ('--account', $Account->name);
 
 $fnret = OVH::Bastion::helper(cmd => \@command);
 $fnret or osh_exit $fnret;
@@ -55,12 +53,12 @@ if ($fnret->err eq 'OK') {
     my $days = $fnret->value->{'days'};
     osh_ok R(
         'OK',
-        value => {account => $account, days => $days},
-        msg   => "Account $account was expired ($days days without connection), it is now active again."
+        value => {account => $Account->name, days => $days},
+        msg   => "Account $Account was expired ($days days without connection), it is now active again."
     );
 }
 elsif ($fnret->is_ok) {
-    osh_ok R('OK_NO_CHANGE', msg => "Account $account wasn't expiring, no change was needed or made.");
+    osh_ok R('OK_NO_CHANGE', msg => "Account $Account wasn't expiring, no change was needed or made.");
 }
 
 osh_exit $fnret;
