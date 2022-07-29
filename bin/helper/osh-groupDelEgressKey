@@ -42,34 +42,30 @@ if (!$group || !$id) {
 #<HEADER
 
 #>PARAMS:GROUP
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-$fnret or HEXIT($fnret);
-
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
-
+my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+$Group or HEXIT($Group);
 #<PARAMS:GROUP
 
 #>RIGHTSCHECK
-if ($self eq 'root') {
+if ($Self->isLocalRoot) {
     osh_debug "Real root, skipping checks of permissions";
 }
-$fnret = OVH::Bastion::is_group_owner(account => $self, group => $shortGroup, superowner => 1);
-if (!$fnret) {
-    HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $self");
+else {
+    $fnret = OVH::Bastion::is_group_owner(account => $Self->name, group => $Group->name, superowner => 1);
+    if (!$fnret) {
+        HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $Self");
+    }
 }
-
 #<RIGHTSCHECK
 
 #>CODE
-$fnret = OVH::Bastion::get_group_keys(group => $group);
+$fnret = $Group->getKeys();
 $fnret or HEXIT($fnret);
 
 my @matchingKeys = grep { $fnret->value->{'keys'}{$_}{'id'} eq $id } @{$fnret->value->{'sortedKeys'} || []};
 
 if (!@matchingKeys) {
-    HEXIT('ERR_INVALID_PARAMETER', msg => "Couldn't find any key with the ID you specified ($id) in group $shortGroup");
+    HEXIT('ERR_INVALID_PARAMETER', msg => "Couldn't find any key with the ID you specified ($id) in group ".$Group->name);
 }
 
 my $keyToDelete = $matchingKeys[0];
@@ -81,7 +77,7 @@ OVH::Bastion::print_public_key(key => $key);
 # get the path to the privkey
 my $fileToDelete = $fnret->value->{'keys'}{$keyToDelete}{'fullpath'};
 if (!-f $fileToDelete) {
-    warn_syslog("The file '$fileToDelete' doesn't exist while trying to delete this egress key from group $shortGroup");
+    warn_syslog("The file '$fileToDelete' doesn't exist while trying to delete this egress key from group ".$Group->name);
     HEXIT('ERR_INVALID_PARAMETER', msg => "Couldn't find the key file");
 }
 
@@ -104,8 +100,8 @@ OVH::Bastion::syslogFormatted(
     type     => 'group',
     fields   => [
         [action          => 'delete_egress_key'],
-        [group           => $shortGroup],
-        [self            => $self],
+        [group           => $Group->name],
+        [self            => $Self->name],
         [key_id          => $key->{'id'}],
         [key_algo        => $key->{'typecode'}],
         [key_algo_family => $key->{'family'}],
@@ -118,4 +114,4 @@ OVH::Bastion::syslogFormatted(
     ]
 );
 
-HEXIT('OK', value => $key, msg => "Key $id has successfully been deleted from the $shortGroup group");
+HEXIT('OK', value => $key, msg => "Key $id has successfully been deleted from the ".$Group->name." group");

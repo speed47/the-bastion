@@ -120,15 +120,15 @@ foreach my $accountName (sort keys %accounts) {
     }
     elsif ($Account->type eq 'realm') {
         # get all the known remote accounts of this realm
-        $fnret = OVH::Bastion::get_remote_accounts_from_realm(realm => $Account->realm); # FIXME does a sharedrealmacc has a ->realm?
+        $fnret = $Account->getRemoteAccountsNames();
         if (!$fnret) {
             warn_syslog("Error listing the remote accounts of realm '" . $Account->realm . "': " . $fnret->msg);
             next;
         }
-        foreach my $remoteaccount (@{$fnret->value || []}) {
-            my $RemoteAccount = OVH::Bastion::Account->newFromName($Account->realm . '/' . $remoteaccount);
+        foreach my $remoteAccountName (@{$fnret->value || []}) {
+            my $RemoteAccount = OVH::Bastion::Account->newFromName($Account->realm . '/' . $remoteAccountName, type => "remote");
             if (!$RemoteAccount) {
-                warn_syslog("Error instanciating the remote account '$remoteaccount' of realm '"
+                warn_syslog("Error instanciating the remote account '$remoteAccountName' of realm '"
                       . $Account->realm . "': "
                       . $RemoteAccount->msg);
                 next;

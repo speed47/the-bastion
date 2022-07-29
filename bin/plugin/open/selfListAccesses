@@ -39,7 +39,7 @@ EOF
 
 my $fnret;
 
-$fnret = OVH::Bastion::get_acls(account => $Self->name);
+$fnret = $Self->getAllAcls();
 $fnret or osh_exit $fnret;
 
 if (not @{$fnret->value}) {

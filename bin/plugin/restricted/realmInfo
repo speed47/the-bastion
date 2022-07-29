@@ -31,19 +31,22 @@ if (!$pRealm) {
 my $RealmSupportAccount = OVH::Bastion::Account->newFromName("realm_$pRealm", type => "realm", check => 1);
 $RealmSupportAccount or osh_exit($RealmSupportAccount);
 
-$fnret = OVH::Bastion::get_remote_accounts_from_realm(realm => $RealmSupportAccount->realm);
+$fnret = $RealmSupportAccount->getRemoteAccountsNames();
 $fnret or osh_exit $fnret;
 
 my @accounts = sort @{$fnret->value};
 my %details;
 
 if (@accounts) {
-    osh_info "The following accounts from realm $pRealm are known:";
+    osh_info "The following accounts from realm ".$RealmSupportAccount->realm." are known:";
     foreach my $account (@accounts) {
-        $fnret = OVH::Bastion::get_acls(account => sprintf("%s/%s", $RealmSupportAccount->realm, $account));
+        my $RemoteAccount = OVH::Bastion::Account->newFromName($account, check => 1);
+        $RemoteAccount or next;
+
+        $fnret = $RemoteAccount->getAllAcls();
         my $nb = $fnret ? scalar(@{$fnret->value}) : "?";
-        $details{$account} = {accesses => ($fnret ? scalar(@{$fnret->value}) : undef)};
-        osh_info sprintf("- %-18s [%s accesses]", $account, $nb);
+        $details{$RemoteAccount->name} = {accesses => ($fnret ? scalar(@{$fnret->value}) : undef)};
+        osh_info sprintf("- %-18s [%s accesses]", $RemoteAccount->name, $nb);
     }
     osh_info("\nTo get their access list, use --osh accountListAccesses --account "
           . $RealmSupportAccount->realm

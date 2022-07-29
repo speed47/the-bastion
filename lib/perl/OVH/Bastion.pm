@@ -10,6 +10,7 @@ use Hash::Util qw{ unlock_hashref_recurse };
 use File::Basename;
 use lib dirname(__FILE__) . '/..';
 use OVH::Bastion::Account;
+use OVH::Bastion::Group;
 
 our $VERSION = '3.99.99-alpha1';
 
@@ -1020,6 +1021,24 @@ sub can_use_utf8 {
     return ($ENV{'LANG'} && ($ENV{'LANG'} =~ /utf-?8/i) && $ENV{'TERM'} && $ENV{'TERM'} !~ /dumb|unknown/i);
 }
 
+sub call_stack {
+    my $i = 1;
+    my $callerStack = sprintf("%s", (caller($i))[3]);
+    $i++;
+    while (caller($i)) {
+        if ($i > 200) {
+            # as we're being called by a bunch of different funcs, let's take this opportunity to
+            # implement a basic anti-infinite loop.
+            # if the stack has more than 200 calls, we clearly have a problem
+            die("Possible infinite loop detected, aborting");
+        }
+        my $func = (caller($i))[3];
+        $callerStack .= " < $func" if $func !~ m{^Memoize};
+        $i++;
+    }
+    return sprintf("func '%s' by '%s[%d]'", $callerStack, $0, $$);
+}
+
 sub check_args {
     my ($args, %p) = @_;
     my $mandatory        = $p{'mandatory'}        || [];
@@ -1035,21 +1054,6 @@ sub check_args {
     my @errorUnknown;
     my @errorMissing;
     my @errorFalse;
-
-    my $callerStack = sprintf("%s[%s]", (caller(1))[3], (caller(1))[2]);
-    my $i           = 2;
-    while (caller($i)) {
-        if ($i > 200) {
-            # as we're being called by a bunch of different funcs, let's take this opportunity to
-            # implement a basic anti-infinite loop.
-            # if the stack has more than 200 calls, we clearly have a problem
-            die("Possible infinite loop detected, aborting");
-        }
-        my $func = (caller($i))[3];
-        my $line = (caller($i))[2];
-        $callerStack .= " < $func\[$line\]" if $func !~ m{^Memoize};
-        $i++;
-    }
 
     foreach my $key (keys %$args) {
         # we've seen this key, drop it from the keys-that-are-yet-to-be-seen
@@ -1069,10 +1073,11 @@ sub check_args {
     push @errorMissing, keys %unseenMandatory;
 
     # log verbose info in logs
+    my $callerStack = OVH::Bastion::call_stack();
     warn_syslog(
         sprintf(
-            "check_args: mandatory parameters '@errorMissing' missing in call to '%s' by '%s[%s]'",
-            $callerStack, $0, (caller(0))[2]
+            "check_args: mandatory parameters '@errorMissing' missing in call to '%s' by '%s'",
+            $callerStack, $0
         )
     ) if @errorMissing;
     warn_syslog(sprintf("check_args: unknown parameters '@errorUnknown' in func '%s' by '%s'", $callerStack, $0))

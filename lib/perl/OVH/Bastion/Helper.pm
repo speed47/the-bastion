@@ -63,15 +63,28 @@ $ENV{'PATH'} = '/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:/us
 
 # Build $self from SUDO_USER, as helpers are always run under sudo
 ($self) = $ENV{'SUDO_USER'} =~ m{^([a-zA-Z0-9._-]+)$};
-if (not defined $self) {
-    if ($< == 0) {
-        $self = 'root';
-        $Self = OVH::Bastion::Account->newLocalRoot();
-    }
-    else {
-        HEXIT('ERR_SUDO_NEEDED', msg => 'This command must be run under sudo');
-    }
+
+if (!defined $self && $< == 0) {
+    # launched by root directly
+    $self = 'root';
+    $Self = OVH::Bastion::Account->newLocalRoot();
 }
-$Self = OVH::Bastion::Account->newFromName($self) if !$Self;
+
+if (!defined $self) {
+    HEXIT('ERR_SUDO_NEEDED', msg => 'This command must be run under sudo');
+}
+
+if ($self eq 'root' && $< != 0) {
+    # launched by another helper, most probably, to sudo to a non-root user
+    $Self = OVH::Bastion::Account->newLocalRoot();
+}
+else {
+    $Self = OVH::Bastion::Account->newFromName($self, check => 1);
+}
+
+if (!$Self)  {
+    osh_crit("houla donc self=$self Self=$Self sudouser=".$ENV{SUDO_USER}." \$<==$<");
+}
+$Self or HEXIT($Self);
 
 1;

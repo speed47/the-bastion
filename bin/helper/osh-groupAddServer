@@ -55,26 +55,18 @@ if (not grep { $action eq $_ } qw{ add del }) {
 #<HEADER
 
 #>PARAMS:GROUP
-osh_debug("Checking group $group");
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => 'key');
-$fnret or HEXIT($fnret);
-
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
-osh_debug("got group $group/$shortGroup");
-
+my $Group = OVH::Bastion::Group->newFromSysGroup($group, check => 1);
+$Group or HEXIT($Group);
 #<PARAMS:GROUP
 
 #>RIGHTSCHECK
-if ($self eq 'root') {
+if ($Self->isLocalRoot) {
     osh_debug "Real root, skipping checks of permissions";
 }
 else {
-    $fnret = OVH::Bastion::is_group_aclkeeper(account => $self, group => $shortGroup, superowner => 1);
-    $fnret or HEXIT('ERR_NOT_ALLOWED', msg => "Sorry, you must be an aclkeeper of group $shortGroup");
+    $fnret = $Group->hasAclkeeper($Self);
+    $fnret or HEXIT('ERR_NOT_ALLOWED', msg => "Sorry, you must be an aclkeeper of group ".$Group->name);
 }
-
 #<RIGHTSCHECK
 
 #>CODE
@@ -86,7 +78,7 @@ $user and $machine = $user . '@' . $machine;
 $fnret = OVH::Bastion::access_modify(
     way           => 'group',
     action        => $action,
-    group         => $group,
+    group         => $Group->sysGroup,
     ip            => $ip,
     user          => $user,
     port          => $port,
@@ -100,7 +92,7 @@ if ($fnret->err eq 'OK') {
         'OK',
         value => {
             action        => $action,
-            group         => $shortGroup,
+            group         => $Group->name,
             ip            => $ip,
             user          => $user,
             port          => $port,
@@ -109,14 +101,14 @@ if ($fnret->err eq 'OK') {
             comment       => $comment
         },
         msg => $action eq 'add'
-        ? "Entry $machine was added to group $shortGroup$ttlmsg"
-        : "Entry $machine was removed from group $shortGroup$ttlmsg"
+        ? "Entry $machine was added to group ".$Group->name."$ttlmsg"
+        : "Entry $machine was removed from group ".$Group->name."$ttlmsg"
     );
 }
 elsif ($fnret->err eq 'OK_NO_CHANGE') {
     HEXIT('OK_NO_CHANGE',
         msg => $action eq 'add'
-        ? "Entry $machine was already added to group $shortGroup, nothing done"
-        : "Entry $machine was not in group $shortGroup, nothing done");
+        ? "Entry $machine was already added to group ".$Group->name.", nothing done"
+        : "Entry $machine was not in group ".$Group->name.", nothing done");
 }
 HEXIT($fnret);

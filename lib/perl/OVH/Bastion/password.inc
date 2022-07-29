@@ -86,19 +86,16 @@ sub get_password_file {
     my $fnret;
 
     if ($context eq 'group') {
-        $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-        $fnret or return $fnret;
+        my $Group = OVH::Bastion::Group->newFromName($group);
+        $Group or return $Group;
 
-        $group = $fnret->value->{'group'};
-        my $shortGroup = $fnret->value->{'shortGroup'};
-        return R('OK', value => "/home/$group/pass/$shortGroup");
+        return R('OK', value => $Group->passwordFile);
     }
     elsif ($context eq 'account') {
-        $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-        $fnret or return $fnret;
+        my $Account = OVH::Bastion::Account->newFromName($account);
+        $Account or return $Account;
 
-        $account = $fnret->value->{'account'};
-        return R('OK', value => "/home/$account/pass/$account");
+        return R('OK', value => $Account->passwordFile);
     }
     else {
         return R('ERR_INVALID_PARAMETER', msg => "Expected a context of 'group' or 'account'");

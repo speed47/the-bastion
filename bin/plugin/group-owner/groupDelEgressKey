@@ -35,27 +35,23 @@ if (!$id || !$group) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing the --group or --id parameter";
 }
 
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-$fnret or osh_exit($fnret);
+my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+$Group or osh_exit($Group);
 
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
-
-if (!OVH::Bastion::is_group_owner(account => $Self->name, group => $shortGroup, superowner => 1)) {
+if (!$Group->hasOwner($Self, superowner => 1)) {
     osh_exit 'ERR_NOT_GROUP_OWNER', "You must be an owner to delete an egress group key";
 }
 
-$fnret = OVH::Bastion::get_group_keys(group => $group);
+$fnret = $Group->getKeys();
 
 my @matchingKeys = grep { $fnret->value->{'keys'}{$_}{'id'} eq $id } @{$fnret->value->{'sortedKeys'} || []};
 
 if (!@matchingKeys) {
-    osh_exit 'ERR_INVALID_PARAMETER', "Couldn't find any key with the ID you specified ($id) in group $shortGroup";
+    osh_exit 'ERR_INVALID_PARAMETER', "Couldn't find any key with the ID you specified ($id) in group ".$Group->name;
 }
 
 my @command = qw{ sudo -n -u keykeeper -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupDelEgressKey';
-push @command, "--group", $group, "--id", $id;
+push @command, "--group", $Group->sysGroup, "--id", $id;
 
 osh_exit(OVH::Bastion::helper(cmd => \@command));

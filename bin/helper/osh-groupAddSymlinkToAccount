@@ -43,55 +43,27 @@ if (not grep { $action eq $_ } qw{ add del }) {
     HEXIT('ERR_INVALID_PARAMETER', msg => "Argument action should be either 'add' or 'del'");
 }
 
-#<HEADER
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or HEXIT($Account);
 
-#>PARAMS:ACCOUNT
-osh_debug("Checking account");
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret or HEXIT($fnret);
+my $Group = OVH::Bastion::Group->newFromSysGroup($group, check => 1);
+$Group or HEXIT($Group);
 
-# get returned untainted value
-$account = $fnret->value->{'account'};
-my $sysaccount    = $fnret->value->{'sysaccount'};
-my $remoteaccount = $fnret->value->{'remoteaccount'};
-
-#<PARAMS:ACCOUNT
-
-#>PARAMS:GROUP
-# test if start by key, append if necessary
-if ($group !~ /^key/) {
-    $group = "key$group";
-}
-osh_debug("Checking group");
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => 'key');
-$fnret or HEXIT($fnret);
-
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
-
-#<PARAMS:GROUP
-
-#>RIGHTSCHECK
-if ($self eq 'root') {
+if ($Self->isLocalRoot) {
     osh_debug "Real root, skipping checks of permissions";
 }
 else {
-    $fnret = OVH::Bastion::is_group_gatekeeper(account => $self, group => $shortGroup, superowner => 1);
+    $fnret = $Group->hasGatekeeper($Self);
     if (!$fnret) {
-        warn_syslog("$0: account $self is not a $shortGroup gatekeeper, refused to continue");
-        HEXIT('ERR_NOT_ALLOWED', msg => "Sorry, you're not a gatekeeper of group $shortGroup");
+        warn_syslog("$0: account $Self is not a $Group gatekeeper, refused to continue");
+        HEXIT('ERR_NOT_ALLOWED', msg => "Sorry, you're not a gatekeeper of group $Group");
     }
 }
 
-#<RIGHTSCHECK
-
-osh_debug("user -gatek or gatek");
-
 #>CODE
 my $msg;
-my $prefix = $remoteaccount ? "allowed_$remoteaccount" : "allowed";
-my $link   = "/home/allowkeeper/$sysaccount/$prefix.ip.$shortGroup";
+my $prefix = $Account->remoteName ? "allowed_".$Account->remoteName : "allowed";
+my $link   = sprintf("/home/allowkeeper/%s/%s.ip.%s", $Account->sysUser, $prefix, $Group->name);
 if ($action eq 'del') {
     osh_debug("Going to remove symlink");
     if (-l $link || -e _) {
@@ -108,7 +80,7 @@ if ($action eq 'del') {
     }
 }
 elsif ($action eq 'add') {
-    my $source = "/home/$group/allowed.ip";
+    my $source = $Group->allowedIpFile;
     osh_debug("symlinking $source to $link");
 
     if (not -e $source) {
@@ -119,7 +91,7 @@ elsif ($action eq 'add') {
     }
     else {
         if (symlink($source, $link)) {
-            $msg = "Account $account now has full access to $shortGroup servers";
+            $msg = "Account $Account now has full access to $Group servers";
         }
         else {
             warn_syslog("$0: error while creating symlink $source to $link ($!)");

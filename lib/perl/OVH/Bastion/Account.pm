@@ -105,6 +105,7 @@ sub newFromName {
         # R('OK', value => {sysaccount => "realm_$1", realm => $1,    remoteaccount => $2,    account => "$1/$2"});
         # R('OK', value => {sysaccount => $1,         realm => undef, remoteaccount => undef, account => $1});
 
+        my $sysaccount = $fnret->value->{'sysaccount'};
         my $allowedPrefix = ($fnret->value->{'remoteaccount'} ? 'allowed_'.$fnret->value->{'remoteaccount'} : 'allowed');
         $Account = {
             # main account attributes
@@ -115,18 +116,20 @@ sub newFromName {
             type            => $fnret->value->{'type'},              # local|remote|realm|localRoot
             isFake          => 0,
 
-            ttyGroup        => $fnret->value->{'sysaccount'}.'-tty',
+            ttyGroup        => "$sysaccount-tty",
 
             # folder and file locations related to this account
-            home                 => '/home/'.$fnret->value->{'sysaccount'}, # isExisting() will yell if /etc/passwd disagrees
-            allowkeeperHome      => '/home/allowkeeper/'.$fnret->value->{'sysaccount'},
-            allowedIpFile        => '/home/allowkeeper/'.$fnret->value->{'sysaccount'}."/$allowedPrefix.ip",
-            allowedPrivateFile   => '/home/allowkeeper/'.$fnret->value->{'sysaccount'}."/$allowedPrefix.private",
-            passHome             => '/home/'.$fnret->value->{'sysaccount'}.'/pass',
-            sshHome              => '/home/'.$fnret->value->{'sysaccount'}.'/.ssh',
-            ttyrecHome           => '/home/'.$fnret->value->{'sysaccount'}.'/ttyrec',
-            authorizedKeysFile   => '/home/'.$fnret->value->{'sysaccount'}.'/.ssh/authorized_keys2',
-            sshConfigFile        => '/home/'.$fnret->value->{'sysaccount'}.'/.ssh/config',
+            home                 => "/home/$sysaccount", # isExisting() will yell if /etc/passwd disagrees
+            allowkeeperHome      => "/home/allowkeeper/$sysaccount",
+            allowedIpFile        => "/home/allowkeeper/$sysaccount/$allowedPrefix.ip",
+            allowedPrivateFile   => "/home/allowkeeper/$sysaccount/$allowedPrefix.private",
+            passHome             => "/home/$sysaccount/pass",
+            passwordFile         => "/home/$sysaccount/pass/$sysaccount",
+
+            sshHome              => "/home/$sysaccount/.ssh",
+            ttyrecHome           => "/home/$sysaccount/ttyrec",
+            authorizedKeysFile   => "/home/$sysaccount/.ssh/authorized_keys2",
+            sshConfigFile        => "/home/$sysaccount/.ssh/config",
 
             # an Account instance may or may not actually exist on the system, until
             # ->isExisting() is called. If the account does exist, said func will
@@ -155,7 +158,7 @@ BEGIN {
     # simple getters, they have no corresponding setter, as Account objects are immutable
     foreach my $attr (qw{
             name sysUser remoteName realm type home allowkeeperHome
-            passHome sshHome ttyrecHome
+            passHome sshHome ttyrecHome passwordFile
             sshConfigFile authorizedKeysFile isFake ttyGroup
         }) {
         *$attr = sub {
@@ -208,7 +211,7 @@ sub notEqual {
 # do NOT memoize this, as we're checking envvars and $<
 sub isLocalRoot {
     my ($this, %p) = @_;
-    return R($this->isFake && $this->name eq '<root>' && $< == 0 && !$ENV{'SUDO_USER'} ? 'OK' : 'KO');
+    return R($this->isFake && $this->name eq '<root>' ? 'OK' : 'KO');
 }
 
 sub _config_file_from_composite_key {
@@ -696,7 +699,7 @@ sub _new_from_name {
     # - remote: allow only realm-formatted accounts aka $realm/$remoteself
     # - regular: either a local or remote account (autodetect and allow both)
     # - realm: a realm support account, must start with realm_*
-    # - account: either a local, remote or realm support account (autodetect and allow these 3)
+    # - account: either a local, or realm support account (autodetect and allow both)
     # - incoming: either a local account or a realm account, in which case we'll autodetect
     #             the remote account (through LC_BASTION) and setup accordingly. If we don't find a remote account
     #             and we have a realm account, deny it (return an error). Mainly used to create an Account instance
@@ -711,12 +714,7 @@ sub _new_from_name {
         $type = ($name =~ m{/} ? 'remote' : 'local');
     }
     elsif ($type eq 'account') {
-        if ($name =~ /^realm_/) {
-            $type = 'realm';
-        }
-        else {
-            $type = ($name =~ m{/} ? 'remote' : 'local');
-        }
+        $type = ($name =~ /^realm_/ ? 'realm' : 'local');
     }
     my $whatis = ($type eq 'remote' ? "Realm" : "Account");
 
@@ -744,8 +742,9 @@ sub _new_from_name {
     elsif ($name =~ m/-tty$/i) {
         return R('KO_FORBIDDEN_SUFFIX', msg => "$whatis name contains an unauthorized suffix");
     }
-    elsif (grep { $name eq $_ } qw{ root proxyhttp keykeeper passkeeper logkeeper realm realm_realm }) {
-        return R('KO_FORBIDDEN_NAME', msg => "$whatis name is reserved");
+    elsif (any { $name eq $_ } qw{ root proxyhttp keykeeper passkeeper logkeeper realm realm_realm }) {
+        #OVH::Bastion::warn_syslog("Attempting to instanciate an account with name=$name from ".OVH::Bastion::call_stack());
+        return R('KO_FORBIDDEN_NAME', msg => "$whatis name '$name' is reserved");
     }
     elsif ($name =~ m{^([a-zA-Z0-9-]+)/([a-zA-Z0-9._-]+)$} && $type eq 'remote') {
 
@@ -846,8 +845,10 @@ sub isAuditor    { my $this = shift; return $this->_has_role("auditor", undef, "
 _memoizify('getGroups');
 sub getGroups {
     my ($this, %p) = @_;
-
-    my $fnret = OVH::Bastion::check_args(\%p);
+    my $fnret = OVH::Bastion::check_args(\%p,
+        optional => [qw{ roles }]
+    );
+    $fnret or return $fnret;
 
     $fnret = $this->isExisting();
     $fnret or return $fnret;
@@ -879,7 +880,12 @@ sub getGroups {
                     $type = 'guest'; # FIXME later: we should check if there is at least one allowed.ip.partial
                 }
             }
-            $result{$groupname}{$type} = 1;
+
+            # if roles is not specified, we return everything, otherwise we return only the
+            # groups whole $this has at least one of the asked roles in
+            if (!$p{'roles'} || any { $type eq $_ } @{ $p{'roles'} }) {
+                $result{$groupname}{$type} = 1;
+            }
         }
     }
     return R('OK', value => \%result);
@@ -1169,11 +1175,146 @@ sub accessModify {
         # group: only for way=group or way=groupguest
         optional => [qw{ group }],
     );
+    $fnret or return $fnret;
 
     $fnret = $this->isExisting();
     $fnret or return $fnret;
 
     return OVH::Bastion::access_modify(Account => $this, %p);
+}
+
+sub generateEgressKey {
+    my ($this, %p) = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ algo size }],
+        optional => [qw{ passphrase }],
+    );
+    $fnret or return $fnret;
+
+    $fnret = $this->isExisting();
+    $fnret or return $fnret;
+
+    require OVH::Bastion::Key;
+    my $Key = OVH::Bastion::Key->newFromKeygen(
+        folder => $this->sshHome,
+        filenamePrefix => 'private',
+        name => $this->sysUser,
+        algo       => $p{'algo'},
+        size       => $p{'size'},
+        passphrase => $p{'passphrase'},
+    );
+    return $Key;
+}
+
+# only for realm support accounts, we return a list of account NAMES (not objects)
+# that will all be of the "joe1", "joe2", etc. format. i.e. the actual full name
+# of the account is realmName/joeX
+_memoizify('getRemoteAccountsNames');
+sub getRemoteAccountsNames {
+    my ($this,%p)     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p);
+    $fnret or return $fnret;
+
+    $fnret = $this->isExisting();
+    $fnret or return $fnret;
+
+    if ($this->type ne 'realm') {
+        return R('ERR_NOT_A_REALM_SUPPORT_ACCOUNT', msg => "Can't get the remote accounts list of a non-realm account");
+    }
+
+    my %accounts;
+    if (opendir(my $dh, $this->allowkeeperHome)) {
+        while (my $filename = readdir($dh)) {
+            if ($filename =~ /allowed_([a-zA-Z0-9._-]+)\.(ip|partial|private)/) {
+                $accounts{$1} = 1;
+            }
+        }
+        closedir($dh);
+    }
+    return R('OK', value => [sort keys %accounts]);
+}
+
+sub getAllAcls {
+    my ($this, %p) = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+    );
+    $fnret or return $fnret;
+
+    my @acls;
+    require Data::Dumper;
+
+    $fnret = $this->check();
+    $fnret or return $fnret;
+
+    # 1/3 check for personal accesses
+    # ... normal way
+    my $grantedPersonal = OVH::Bastion::get_acl_way(way => 'personal', account => $this->name);
+    OVH::Bastion::osh_debug("get_acls: grantedPersonal=" . Data::Dumper::Dumper($grantedPersonal));
+    push @acls, {type => 'personal', acl => $grantedPersonal->value}
+      if ($grantedPersonal && @{$grantedPersonal->value});
+
+    # ... legacy way
+    my $grantedLegacy = OVH::Bastion::get_acl_way(way => 'legacy', account => $this->name);
+    OVH::Bastion::osh_debug("get_acls: grantedLegacy=" . Data::Dumper::Dumper($grantedLegacy));
+    push @acls, {type => 'personal-legacy', acl => $grantedLegacy->value}
+      if ($grantedLegacy && @{$grantedLegacy->value});
+
+    # 2/3 check groups
+    $fnret = $this->getGroups(roles => [qw{ member guest }]);
+    $fnret or return $fnret;
+
+    my %groups = %{$fnret->value || {}};
+    OVH::Bastion::osh_debug("get_acls: get_user_groups of $this says "
+          . $fnret->msg
+          . " with grouplist "
+          . Data::Dumper::Dumper($fnret->value));
+
+    foreach my $group (keys %{$fnret->value || {}}) {
+        # instanciate and check the group
+        my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+        $Group or next;
+
+        # then check for group access
+        my $grantedGroup = OVH::Bastion::get_acl_way(way => "group", group => $Group->name);
+        OVH::Bastion::osh_debug("get_acls: grantedGroup($Group)=" . Data::Dumper::Dumper($grantedGroup));
+
+        # if group doesn't have access, don't even check legacy either
+        next if not $grantedGroup;
+
+        # now we have to cases, if the group has access: either the account is member or guest
+        if ($groups{$group}{'member'}) {
+
+            # normal member case, just reuse $grantedGroup
+            OVH::Bastion::osh_debug("get_acls: adding grantedGroup to grants because is member");
+            push @acls, {type => 'group-member', group => $group, acl => $grantedGroup->value}
+              if ($grantedGroup && @{$grantedGroup->value});
+        }
+        elsif ($groups{$group}{'guest'}) {
+            # normal guest case
+            my $grantedGuest =
+              OVH::Bastion::get_acl_way(way => "groupguest", group => $Group->name, account => $this->name);
+            OVH::Bastion::osh_debug("get_acls: grantedGuest=" . Data::Dumper::Dumper($grantedGuest));
+
+            # the guy must have a guest access but the group itself must also still have access
+            if ($grantedGuest && $grantedGroup) {
+                OVH::Bastion::osh_debug("get_acls: adding grantedGuest to grants because is guest and group has access");
+                push @acls, {type => 'group-guest', group => $Group->name, acl => $grantedGuest->value}
+                  if @{$grantedGuest->value};
+            }
+
+            # special legacy case; we also check if account has a legacy access for ip AND that the group ALSO has access to this ip
+            if ($grantedLegacy && $grantedGroup) {
+                OVH::Bastion::osh_debug("get_acls: adding grantedLegacy to grants because legacy not null and group has access");
+                push @acls, {type => 'group-guest-legacy', group => $Group->name, acl => $grantedLegacy->value}
+                  if @{$grantedLegacy->value};
+            }
+        }
+        else {
+            # should not happen
+            OVH::Bastion::warn_syslog("get_acls: $this is in group $Group but is neither member or guest !!?");
+        }
+    }
+    return R('OK', value => \@acls);
 }
 
 1;

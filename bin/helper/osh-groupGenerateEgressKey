@@ -45,13 +45,13 @@ if (!$size || !$algo || !$group) {
 
 my $fnret;
 
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-$fnret or HEXIT($fnret);
+my $Group = OVH::Bastion::Group->newFromSysGroup($group, check => 1);
+$Group or HEXIT($Group);
 
 $fnret = OVH::Bastion::Plugin::generateEgressKey::preconditions(
     context  => 'group',
     Self     => $Self,
-    group    => $group,
+    Group    => $Group,
     algo     => $algo,
     size     => $size,
     isHelper => 1,

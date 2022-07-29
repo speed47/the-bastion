@@ -835,29 +835,6 @@ sub is_group_member {
     return _is_group_member_or_guest(want => 'member', group => $p{'group'}, account => $p{'account'});
 }
 
-sub get_remote_accounts_from_realm {
-    my %p     = @_;
-    my $fnret = OVH::Bastion::check_args(\%p, mandatory => [qw{ realm }],);
-    $fnret or return $fnret;
-
-    my $realm = $p{'realm'};
-
-    $realm = "realm_$realm" if $realm !~ /^realm_/;
-    my $RealmSupportAccount = OVH::Bastion::Account->newFromName($realm, type => "realm", check => 1);
-    $RealmSupportAccount or return $RealmSupportAccount;
-
-    my %accounts;
-    if (opendir(my $dh, $RealmSupportAccount->allowkeeperHome)) {
-        while (my $filename = readdir($dh)) {
-            if ($filename =~ /allowed_([a-zA-Z0-9._-]+)\.(ip|partial|private)/) {
-                $accounts{$1} = 1;
-            }
-        }
-        closedir($dh);
-    }
-    return R('OK', value => [sort keys %accounts]);
-}
-
 sub is_valid_ttl {
     my %p     = @_;
     my $fnret = OVH::Bastion::check_args(\%p, mandatoryFalseOk => [qw{ ttl }],);

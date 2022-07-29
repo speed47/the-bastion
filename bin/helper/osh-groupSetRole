@@ -60,12 +60,14 @@ $fnret = OVH::Bastion::Plugin::groupSetRole::preconditions(
 );
 osh_debug("groupSetRole: checking preconditions result: $fnret");
 $fnret or HEXIT($fnret);
-
-my $shortGroup;
-my %values = %{$fnret->value()};
-($group, $shortGroup, $role) = @values{qw{ group shortGroup role }};
+$role = $fnret->value->{'role'};
 my $Account = $fnret->value->{'Account'};
 
+my $Group = OVH::Bastion::Group->newFromSysGroup($group, check => 1);
+$Group or HEXIT($Group);
+
+my $shortGroup = $Group->name;
+$group = $Group->sysGroup;
 #<PARAMS:GROUP
 
 #>RIGHTSCHECK
@@ -74,19 +76,19 @@ my $Account = $fnret->value->{'Account'};
 
 #>CODE
 if ($role eq 'owner') {
-    $fnret = OVH::Bastion::is_group_owner(account => $Account->name, group => $shortGroup);
+    $fnret = $Group->hasOwner($Account);
 }
 elsif ($role eq 'gatekeeper') {
-    $fnret = OVH::Bastion::is_group_gatekeeper(account => $Account->name, group => $shortGroup);
+    $fnret = $Group->hasGatekeeper($Account);
 }
 elsif ($role eq 'aclkeeper') {
-    $fnret = OVH::Bastion::is_group_aclkeeper(account => $Account->name, group => $shortGroup);
+    $fnret = $Group->hasAclkeeper($Account);
 }
 elsif ($role eq 'member') {
-    $fnret = OVH::Bastion::is_group_member(account => $Account->name, group => $shortGroup);
+    $fnret = $Group->hasMember($Account);
 }
 elsif ($role eq 'guest') {
-    $fnret = OVH::Bastion::is_group_guest(account => $Account->name, group => $shortGroup);
+    $fnret = $Group->hasGuest($Account);
 }
 $fnret->is_err and HEXIT($fnret);
 
@@ -111,22 +113,20 @@ if ($action eq 'add') {
     }
 }
 elsif ($action eq 'del') {
-
-    # for realms, maybe we must not delete the shared realm account from the group, if other remote users are still members
+    # for realm support accounts, maybe we must not delete the shared realm account from the group,
+    # if other remote users are still members: check whether this account was the last one, of if there
+    # are others
     my $otherMembers = 0;
     if ($Account->realm) {
-        $fnret = OVH::Bastion::get_remote_accounts_from_realm(realm => $Account->realm);
+        $fnret = $Account->getRemoteAccountsNames;
         $fnret or HEXIT($fnret);
-        foreach my $pRemoteaccount (@{$fnret->value}) {
-            next if ($pRemoteaccount eq $Account->remoteName);
-            if (
-                OVH::Bastion::is_group_member(
-                    account => sprintf("%s/%s", $Account->realm, $pRemoteaccount),
-                    group   => $shortGroup,
-                )
-              )
-            {
+
+        foreach my $remoteAccountName (@{$fnret->value}) {
+            next if ($remoteAccountName eq $Account->remoteName);
+            my $RemoteAccount = OVH::Bastion::Account->newFromName(sprintf("%s/%s", $Account->realm, $remoteAccountName), type => "remote");
+            if ($RemoteAccount && $Group->hasMemberOrGuest($RemoteAccount)) {
                 $otherMembers++;
+                last;
             }
         }
     }

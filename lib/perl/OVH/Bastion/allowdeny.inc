@@ -8,43 +8,6 @@ use Socket qw{ :all };
 use Hash::Util qw{ unlock_hashref_recurse };
 use Memoize;
 
-my %_cache_get_group_keys;
-
-sub get_group_keys {
-    my %p     = @_;
-    my $fnret = OVH::Bastion::check_args(
-        \%p,
-        mandatory       => [qw{ group }],
-        optionalFalseOk => [qw{ cache listOnly forceKey noexec }],
-    );
-    $fnret or return $fnret;
-
-    $p{'listOnly'} = $p{'listOnly'} ? 1 : 0;
-    my $cacheKey = sprintf("%s:%s", $p{'group'}, $p{'listOnly'});
-
-    if ($p{'cache'} and exists $_cache_get_group_keys{$cacheKey}) {
-        return $_cache_get_group_keys{$cacheKey};
-    }
-
-    $fnret = OVH::Bastion::is_valid_group_and_existing(group => $p{'group'}, groupType => 'key');
-    $fnret or return $fnret;
-
-    my $group      = $fnret->value->{'group'};        # untainted version
-    my $shortGroup = $fnret->value->{'shortGroup'};
-    my $keyhome    = $fnret->value->{'keyhome'};
-
-    $fnret = get_pub_keys_from_directory(
-        dir         => $keyhome,
-        pattern     => qr/^id_([a-z0-9]+)_\Q$shortGroup\E/,
-        listOnly    => $p{'listOnly'},
-        forceKey    => $p{'forceKey'},
-        noexec      => $p{'noexec'},
-        wantPrivate => 1,
-    );
-    $_cache_get_group_keys{$cacheKey} = $fnret;
-    return $fnret;
-}
-
 # this function simply checks if the user@ip:port is allowed in the way given,
 # i.e. personal access, group access, groupguest access, or legacy access.
 # it calls is_access_granted_in_file with the proper file location depending
@@ -775,35 +738,31 @@ sub is_access_granted {
           . Data::Dumper::Dumper($groups));
 
     foreach my $group (sort keys %$groups) {
-
-        # sanitize the group name
-        $fnret = OVH::Bastion::is_valid_group(group => $group, groupType => "key");
-        $fnret or next;
-        $group = $fnret->value->{'group'};    # untaint
-        my $shortGroup = $fnret->value->{'shortGroup'};
+        my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+        $Group or next;
 
         # then check for group access
-        my $grantedGroup = is_access_way_granted(%params, way => "group", group => $shortGroup);
+        my $grantedGroup = is_access_way_granted(%params, way => "group", group => $Group->name);
         osh_debug("is_access_granted: grantedGroup=" . Data::Dumper::Dumper($grantedGroup));
         next if not $grantedGroup;            # if group doesn't have access, don't even check legacy either
 
         # now we have to cases, if the group has access: either the account is member or guest
-        if ($groups->{$shortGroup}{'member'}) {
+        if ($groups->{$Group->name}{'member'}) {
 
             # normal member case, just reuse $grantedGroup
             osh_debug("is_access_granted: adding grantedGroup to grants because is member");
-            push @grants, {type => 'group-member', group => $shortGroup, %{$grantedGroup->value}};
+            push @grants, {type => 'group-member', group => $Group->name, %{$grantedGroup->value}};
         }
-        elsif ($groups->{$shortGroup}{'guest'}) {
+        elsif ($groups->{$Group->name}{'guest'}) {
 
             # normal guest case
             my $grantedGuest =
-              is_access_way_granted(%params, way => "groupguest", group => $shortGroup, account => $account);
+              is_access_way_granted(%params, way => "groupguest", group => $Group->name, account => $account);
             osh_debug("is_access_granted: grantedGuest=" . Data::Dumper::Dumper($grantedGuest));
 
             # the guy must have a guest access but the group itself must also still have access
             if ($grantedGuest && $grantedGroup) {
-                push @grants, {type => 'group-guest', group => $shortGroup, %{$grantedGuest->value}};
+                push @grants, {type => 'group-guest', group => $Group->name, %{$grantedGuest->value}};
                 osh_debug("is_access_granted: adding grantedGuest to grants because is guest and group has access");
             }
 
@@ -811,12 +770,12 @@ sub is_access_granted {
             if ($grantedLegacy && $grantedGroup) {
                 osh_debug(
                     "is_access_granted: adding grantedLegacy to grants because legacy not null and group has access");
-                push @grants, {type => 'group-guest-legacy', group => $shortGroup, %{$grantedLegacy->value}};
+                push @grants, {type => 'group-guest-legacy', group => $Group->name, %{$grantedLegacy->value}};
             }
         }
         else {
             # has another role (aclkeeper, gatekeeper, owner) => no access through this group
-            osh_debug("is_access_granted: $account has a role in group $shortGroup but is neither member or guest");
+            osh_debug("is_access_granted: $account has a role in group $Group but is neither member or guest");
         }
     }
 
@@ -825,11 +784,12 @@ sub is_access_granted {
         foreach my $access (@grants) {
             my %data;
             if ($access->{'type'} =~ /^group/ and $access->{'group'}) {
-                $data{'keys'} = OVH::Bastion::get_group_keys(
-                    group    => $access->{'group'},
-                    listOnly => $listOnly,
-                    noexec   => $noexec,
-                    forceKey => $access->{'forceKey'}
+                my $Group = OVH::Bastion::Group->newFromName($access->{'group'}, check => 1);
+                $Group or next;
+                $data{'keys'} = $Group->getKeys(
+                        listOnly => $listOnly,
+                        noexec   => $noexec,
+                        forceKey => $access->{'forceKey'}
                 );
                 $data{'mfa'} = OVH::Bastion::group_config(key => "mfa_required", group => $access->{'group'});
                 $data{'idle_lock_timeout'} = OVH::Bastion::group_config(%{OVH::Bastion::OPT_GROUP_IDLE_LOCK_TIMEOUT()},
@@ -904,13 +864,12 @@ sub ssh_test_access_way {
     $user = $fnret->value;
 
     my $Account;
+    my $Group;
     if ($group) {
-        $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-        $fnret or return $fnret;
-        my $shortGroup = $fnret->value->{'shortGroup'};
-        $group = $fnret->value->{'group'};
+        $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+        $Group or return $Group;
 
-        $fnret = OVH::Bastion::get_group_keys(group => $shortGroup);
+        $fnret = $Group->getKeys();
     }
     elsif ($account) {
         $Account = OVH::Bastion::Account->newFromName($account, check => 1);
@@ -994,92 +953,6 @@ sub ssh_test_access_way {
     $msg .= ". $hint" if defined $hint;
 
     return R('ERR_CONNECTION_FAILED', msg => $msg);
-}
-
-# get all accesses from an account, by any way possible
-# returns: arrayref of contextualized acls, contextualized-acl: { type, group, \@aclentries }
-sub get_acls {
-    my %params  = @_;
-    my $account = $params{'account'};
-
-    my @acls;
-    my $fnret;
-    require Data::Dumper;
-
-    my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
-    $Account or return $Account;
-
-    # 1/3 check for personal accesses
-    # ... normal way
-    my $grantedPersonal = OVH::Bastion::get_acl_way(way => 'personal', account => $Account->name);
-    osh_debug("get_acls: grantedPersonal=" . Data::Dumper::Dumper($grantedPersonal));
-    push @acls, {type => 'personal', acl => $grantedPersonal->value}
-      if ($grantedPersonal && @{$grantedPersonal->value});
-
-    # ... legacy way
-    my $grantedLegacy = OVH::Bastion::get_acl_way(way => 'legacy', account => $Account->name);
-    osh_debug("get_acls: grantedLegacy=" . Data::Dumper::Dumper($grantedLegacy));
-    push @acls, {type => 'personal-legacy', acl => $grantedLegacy->value}
-      if ($grantedLegacy && @{$grantedLegacy->value});
-
-    # 2/3 check groups
-    $fnret = $Account->getGroups();
-    $fnret or return $fnret;
-
-    my %groups = %{$fnret->value || {}};
-    osh_debug("get_acls: get_user_groups of $Account says "
-          . $fnret->msg
-          . " with grouplist "
-          . Data::Dumper::Dumper($fnret->value));
-
-    foreach my $group (keys %{$fnret->value || {}}) {
-
-        # sanitize the group name
-        $fnret = OVH::Bastion::is_valid_group(group => $group, groupType => "key");
-        $fnret or next;
-        $group = $fnret->value->{'group'};    # untaint
-        my $shortGroup = $fnret->value->{'shortGroup'};
-
-        # then check for group access
-        my $grantedGroup = OVH::Bastion::get_acl_way(way => "group", group => $shortGroup);
-        osh_debug("get_acls: grantedGroup($shortGroup)=" . Data::Dumper::Dumper($grantedGroup));
-        next if not $grantedGroup;            # if group doesn't have access, don't even check legacy either
-
-        # now we have to cases, if the group has access: either the account is member or guest
-        if ($groups{$shortGroup}{'member'}) {
-
-            # normal member case, just reuse $grantedGroup
-            osh_debug("get_acls: adding grantedGroup to grants because is member");
-            push @acls, {type => 'group-member', group => $shortGroup, acl => $grantedGroup->value}
-              if ($grantedGroup && @{$grantedGroup->value});
-        }
-        elsif ($groups{$shortGroup}{'guest'}) {
-
-            # normal guest case
-            my $grantedGuest =
-              OVH::Bastion::get_acl_way(way => "groupguest", group => $shortGroup, account => $Account->name);
-            osh_debug("get_acls: grantedGuest=" . Data::Dumper::Dumper($grantedGuest));
-
-            # the guy must have a guest access but the group itself must also still have access
-            if ($grantedGuest && $grantedGroup) {
-                osh_debug("get_acls: adding grantedGuest to grants because is guest and group has access");
-                push @acls, {type => 'group-guest', group => $shortGroup, acl => $grantedGuest->value}
-                  if @{$grantedGuest->value};
-            }
-
-            # special legacy case; we also check if account has a legacy access for ip AND that the group ALSO has access to this ip
-            if ($grantedLegacy && $grantedGroup) {
-                osh_debug("get_acls: adding grantedLegacy to grants because legacy not null and group has access");
-                push @acls, {type => 'group-guest-legacy', group => $shortGroup, acl => $grantedLegacy->value}
-                  if @{$grantedLegacy->value};
-            }
-        }
-        else {
-            # should not happen
-            osh_debug("get_acls: $Account is in group $shortGroup but is neither member or guest !!?");
-        }
-    }
-    return R('OK', value => \@acls);
 }
 
 # this function simply returns the requested acl

@@ -37,21 +37,9 @@ if (!$group) {
     HEXIT('ERR_MISSING_PARAMETER', msg => "Missing argument 'group'");
 }
 
-#<HEADER
+my $Group = OVH::Bastion::Group->newFromSysGroup($group, check => 1);
+$Group or HEXIT($Group);
 
-#>PARAMS:GROUP
-# test if start by key, append if necessary
-osh_debug("Checking group");
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-$fnret or HEXIT($fnret);
-
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
-
-#<PARAMS:GROUP
-
-#>RIGHTSCHECK
 if ($Self->isLocalRoot) {
     osh_debug "Real root, skipping checks of permissions";
 }
@@ -59,23 +47,15 @@ else {
     # either we can delete any group
     $fnret = OVH::Bastion::is_user_in_group(user => $self, group => "osh-groupDelete");
     if (!$fnret) {
-
         # or we can delete our own group as the owner of said group
-        $fnret = OVH::Bastion::is_group_owner(account => $self, group => $shortGroup, superowner => 1);
+        $fnret = $Group->hasOwner($Self, superowner => 1);
         if (!$fnret) {
-            HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $self");
+            HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $Self");
         }
     }
 }
 
-#<RIGHTSCHECK
-
 #>CODE
-# last security check
-if (not -e "/home/$group/allowed.ip" or not -e "/home/keykeeper/$group") {
-    HEXIT('ERR_INVALID_GROUP', msg => "Sorry, but $shortGroup doesn't seem to be a legit bastion group");
-}
-
 # do the stuff
 osh_info("Backing up group directory...");
 
@@ -93,6 +73,7 @@ chmod 0700, "/home/oldkeeper/groups";
 
 my $suffix = 'at-' . time() . '.by-' . $self;
 
+my $group = $Group->sysGroup;
 my $fulldir = "/home/oldkeeper/groups/$group.$suffix";
 if (-e $fulldir) {
     HEXIT('ERR_BACKUP_DIR_COLLISION', msg => "This shouldn't happen, $fulldir already exists!");
@@ -170,7 +151,7 @@ if (opendir($dh, "/home/allowkeeper")) {
         $dir !~ /^([a-zA-Z0-9._-]+)$/ and next;
         $dir = "/home/allowkeeper/$1";    # and untaint
         -d $dir or next;
-        foreach my $file ("$dir/allowed.ip.$shortGroup", "$dir/allowed.partial.$shortGroup") {
+        foreach my $file ("$dir/allowed.ip.$Group", "$dir/allowed.partial.$Group") {
             if (-e $file || -l $file) {
                 osh_info "Removing $file...";
                 if (!unlink($file)) {
@@ -250,7 +231,7 @@ if (!$fnret) {
 OVH::Bastion::syslogFormatted(
     severity => 'info',
     type     => 'group',
-    fields   => [['action', 'delete'], ['group', $shortGroup], ['errors', $nbErrors]]
+    fields   => [['action', 'delete'], ['group', $Group->name], ['errors', $nbErrors]]
 );
 
 HEXIT(

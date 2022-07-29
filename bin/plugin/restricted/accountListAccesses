@@ -49,7 +49,7 @@ if (not $account) {
 my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
 $Account or osh_exit($Account);
 
-$fnret = OVH::Bastion::get_acls(account => $Account->name);
+$fnret = $Account->getAllAcls();
 $fnret or osh_exit $fnret;
 
 if (!$Self->isAuditor) {

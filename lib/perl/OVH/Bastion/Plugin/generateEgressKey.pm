@@ -74,8 +74,8 @@ sub preconditions {
     my %params = @_;
     my $fnret;
 
-    my ($Self, $group, $algo, $size, $account, $Account, $context) =
-      @params{qw{  Self  group  algo   size   account   Account   context}};
+    my            ($Self, $Group, $algo, $size, $Account, $context) =
+      @params{qw{  Self  Group algo   size   Account   context}};
 
     if (!$algo || !$context) {
         return R('ERR_MISSING_PARAMETER', msg => "Missing argument algo[$algo] or context[$context]");
@@ -90,31 +90,29 @@ sub preconditions {
     $fnret or return $fnret;
     ($algo, $size) = @{$fnret->value}{qw{ algo size }};    # untaint
 
+    $fnret = $Self->check();
+    $fnret or return $fnret;
+
     # check preconditions if we're generating a key for a group
     if ($context eq 'group') {
-        if (!$group || !$Self) {
-            return R('ERR_MISSING_PARAMETER', msg => "Missing 'group' or 'Self' parameter");
+        if (!$Group || !$Self) {
+            return R('ERR_MISSING_PARAMETER', msg => "Missing 'Group' or 'Self' parameter");
         }
-        $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => 'key');
+        $fnret = $Group->check();
         $fnret or return $fnret;
-        my $keyhome    = $fnret->value->{'keyhome'};
-        my $shortGroup = $fnret->value->{'shortGroup'};
-        $group = $fnret->value->{'group'};
 
-        $fnret = OVH::Bastion::is_group_owner(group => $shortGroup, account => $Self->name, superowner => 1);
+        $fnret = $Group->hasOwner($Self, superowner => 1);
         if (!$fnret) {
             return R('ERR_NOT_GROUP_OWNER',
                 msg =>
-                  "Sorry, you're not an owner of group $shortGroup, which is needed to manage its egress keys ($fnret)"
+                  "Sorry, you're not an owner of group $Group, which is needed to manage its egress keys"
             );
         }
 
         return R(
             'OK',
             value => {
-                group      => $group,
-                shortGroup => $shortGroup,
-                keyhome    => $keyhome,
+                Group      => $Group,
                 algo       => $algo,
                 size       => $size,
                 context    => $context
@@ -122,17 +120,14 @@ sub preconditions {
         );
     }
     elsif ($context eq 'account') {
-        if (!$account && !$Account) {
-            return R('ERR_MISSING_PARAMETER', msg => "Missing 'group' parameter");
-        }
         if (!$Account) {
-            $Account = OVH::Bastion::Account->newFromName($account);
-            $Account or return $Account;
+            return R('ERR_MISSING_PARAMETER', msg => "Missing 'Account' parameter");
         }
+
         $fnret = $Account->check();
         $fnret or return $fnret;
 
-        return R('OK', value => {algo => $algo, size => $size, context => $context});
+        return R('OK', value => {Account => $Account, algo => $algo, size => $size, context => $context});
     }
     else {
         return R('ERR_INTERNAL');

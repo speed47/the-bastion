@@ -69,17 +69,16 @@ if ($encrypted) {
 }
 
 osh_info "Generating your key, this might take a while...";
-$fnret = OVH::Bastion::generate_ssh_key(
-    folder     => $Self->home . '/.ssh',
-    prefix     => 'private',
-    name       => $Self->name,
+my $Key = $Self->generateEgressKey(
     algo       => $algo,
     size       => $size,
     passphrase => $passphrase,
 );
-$fnret or osh_exit $fnret;
+$Key or osh_exit $Key;
 
 osh_info "You new key pair has been generated:\n";
+# FIXME handle auto-from prefix for egress keys in Key
+=cut
 $fnret = OVH::Bastion::get_ssh_pub_key_info(file => $fnret->value->{'file'} . ".pub", way => "egress");
 $fnret or osh_exit $fnret;
 
@@ -89,7 +88,9 @@ $fnret = OVH::Bastion::get_bastion_ips();
 $fnret or osh_exit $fnret;
 
 $key->{'prefix'} = 'from="' . join(',', @{$fnret->value}) . '"';
+=cut
 
-OVH::Bastion::print_public_key(key => $key);
+$Key->print();
+#OVH::Bastion::print_public_key(key => $key);
 
-osh_ok($key);
+osh_ok({}); # FIXME TOJSON

@@ -363,13 +363,13 @@ sub act {
             }
             else {
                 # in realm-mode, we need to check that all the other remote accounts no longer have access either, before removing the key
-                $fnret = OVH::Bastion::get_remote_accounts_from_realm(realm => $Account->realm);
+                $fnret = $Account->getRemoteAccountsNames();
                 $fnret or return $fnret;
-                foreach my $pRemoteaccount (@{$fnret->value}) {
+                foreach my $remoteAccountName (@{$fnret->value}) {
                     $fnret = OVH::Bastion::get_acl_way(
                         way     => 'groupguest',
                         group   => $shortGroup,
-                        account => sprintf("%s/%s", $Account->realm, $pRemoteaccount)
+                        account => sprintf("%s/%s", $Account->realm, $remoteAccountName)
                     );
                     $accessesFound += @{$fnret->value};
                     last if $accessesFound > 0;

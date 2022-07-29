@@ -44,15 +44,13 @@ EOF
     return 0;
 }
 
-#
-# code
-#
-my $fnret;
+my $Group = OVH::Bastion::Group->newFromName($group);
+$Group or osh_exit($Group);
 
-$fnret = OVH::Bastion::Plugin::generateEgressKey::preconditions(
+my $fnret = OVH::Bastion::Plugin::generateEgressKey::preconditions(
     context => 'group',
     Self    => $Self,
-    group   => $group,
+    Group   => $Group,
     algo    => $algo,
     size    => $size
 );
@@ -62,8 +60,7 @@ if ($fnret->err eq 'ERR_MISSING_PARAMETER') {
 }
 $fnret or osh_exit $fnret;
 
-my ($shortGroup, $keyhome);
-($group, $algo, $size, $shortGroup, $keyhome) = @{$fnret->value}{qw{ group algo size shortGroup keyhome }};
+($algo, $size) = @{$fnret->value}{qw{ algo size }};
 
 my $passphrase = '';    # empty by default
 if ($encrypted) {
@@ -74,7 +71,7 @@ if ($encrypted) {
 
 my @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupGenerateEgressKey';
-push @command, '--group', $group;
+push @command, '--group', $Group->name;
 push @command, '--algo', $algo;
 push @command, '--size', $size;
 push @command, '--encrypted' if $encrypted;

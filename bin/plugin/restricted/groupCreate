@@ -146,7 +146,11 @@ else {
         $from = 'from="' . join(',', @ips) . '"';
     }
 
-    $fnret = OVH::Bastion::get_group_keys(group => $group);
+    my $Group = OVH::Bastion::Group->newFromName($group);
+    $Group->refresh();
+    $fnret = $Group->check();
+
+    $fnret = $Group->getKeys();
     if ($fnret and $from) {
         foreach my $keyfile (@{$fnret->value->{'sortedKeys'}}) {
             my $key = $fnret->value->{'keys'}{$keyfile};
