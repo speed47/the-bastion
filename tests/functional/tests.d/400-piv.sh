@@ -70,7 +70,7 @@ EOF
     json .command selfAddIngressKey .error_code ERR_NO_PEM_START_MARKER
 
     # set min rsa size to 2048 so we can work
-    configchg 's=^\\\\x22minimumIngressRsaKeySize\\\\x22.+=\\\\x22minimumIngressRsaKeySize\\\\x22:2048,='
+    configset minimumIngressRsaKeySize 2048
 
     # add a key which doesn't match the certs
     script piv_badcert "( cat $account2key1file.pub; echo \"$piv_attestation\"; echo \"$piv_certificate\" ) | $a1 --osh selfAddIngressKey --piv"
@@ -111,7 +111,7 @@ EOF
 
     # account0 sudo account1 to try to add a non-piv key. this must not work.
     # for this trick, a0 needs to use adminSudo hence needs to be an admin
-    configchg 's=^\\\\x22adminAccounts\\\\x22.+=\\\\x22adminAccounts\\\\x22:[\\\\x22'"$account0"'\\\\x22],='
+    configset adminAccounts "[\\\"$account0\\\"]"
 
     success set_a0_as_admin $r0 "\". $opt_remote_basedir/lib/shell/functions.inc; add_user_to_group_compat $account0 osh-admin\""
 

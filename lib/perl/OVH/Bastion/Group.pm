@@ -1,7 +1,10 @@
 package OVH::Bastion::Group;
+# vim: set filetype=perl ts=4 sw=4 sts=4 et:
 use common::sense;
+use feature qw(switch);
 
 use Hash::Util qw{ lock_hashref_recurse lock_ref_value unlock_ref_value };
+use Fcntl;
 use Memoize;
 use Scalar::Util qw{ refaddr };
 use List::Util qw{ none any };
@@ -33,7 +36,7 @@ sub _memoizify {
     return memoize(
         $funcname,
         SCALAR_CACHE => ['HASH' => \%CACHE],
-        LIST_CACHE => 'FAULT',
+        LIST_CACHE => ['HASH' => \%CACHE],
         NORMALIZER => sub { unshift @_, $funcname; goto \&_normalize; }
     );
 }
@@ -47,11 +50,23 @@ sub refresh {
     my $nbdeleted = 0;
     foreach my $key (keys %CACHE) {
         if ($key =~ /^\Q$addr!/) {
+            print "$key\n"; # FIXME MIGRA
             delete $CACHE{$key};
             $nbdeleted++;
         }
     }
+    # also clear the sys group cache
+    OVH::Bastion::sys_clear_cache();
     return R('OK', value => $nbdeleted);
+}
+
+sub dbg {
+    return 1 if !$ENV{'OSH_DEBUG'};
+    my ($this, $msg) = @_;
+    return OVH::Bastion::osh_debug(sprintf("%s(%s[0x%x]): %s called by %s",
+        (caller(1))[3], $this->name, refaddr($this), $msg,
+        OVH::Bastion::call_stack(2)
+    ));
 }
 
 sub newFromSysGroup {
@@ -123,11 +138,14 @@ sub newFromName {
     my $Group = {
         name            => $name,
         sysGroup        => "key$name",
+        sysUser         => "key$name",
         sysGroupGatekeeper        => "key$name-gatekeeper",
         sysGroupAclkeeper        => "key$name-aclkeeper",
         sysGroupOwner        => "key$name-owner",
-        keyHome    => "/home/keykeeper/key$name",
-        passwordFile => "/home/key$name/pass/$name",
+        keyHome       => "/home/keykeeper/key$name",
+        home          => "/home/key$name",
+        passwordHome  => "/home/key$name/pass",
+        passwordFile  => "/home/key$name/pass/$name",
         allowedIpFile => "/home/key$name/allowed.ip",
 
         # a Group instance may or may not actually exist on the system, until
@@ -164,7 +182,7 @@ BEGIN {
     # simple getters, they have no corresponding setter, as Group objects are immutable
     foreach my $attr (qw{
             name sysGroup sysGroupGatekeeper sysGroupAclkeeper sysGroupOwner keyHome
-            passwordFile allowedIpFile
+            passwordFile allowedIpFile home sysUser passwordHome
         }) {
         *$attr = sub {
             my $this = shift;
@@ -226,12 +244,22 @@ _memoizify('check');
 sub check {
     my ($this, %p) = @_;
 
+    print "MIGRA check\n";
+
     my $fnret = $this->isExisting();
     $fnret or return $fnret;
+
+    print "MIGRA check isexistingok\n";
+
+    if (!-d $this->home) {
+        return R('KO_INVALID_DIRECTORY', msg => "This group's home directory doesn't exist");
+    }
 
     if (!-d $this->keyHome) {
         return R('KO_INVALID_DIRECTORY', msg => "This group's key directory doesn't exist");
     }
+
+    print "MIGRA check isexistingok reutrnOK\n";
 
     return R('OK');
 }
@@ -311,19 +339,28 @@ sub getMembersOrGuests {
     $fnret = $this->isExisting();
     $fnret or return $fnret;
 
+    $this->dbg("system member list of this group is: ".join(" ", @{ $this->{'members'} || [] }));
+
     my @list;
     foreach my $accountName (@{ $this->{'members'} || [] }) {
         next if $accountName eq 'allowkeeper';
 
         my $Account = OVH::Bastion::Account->newFromName($accountName, type => "account");
-        $Account or next;
+        if (!$Account) {
+            OVH::Bastion::warn_syslog("Got an invalid account '$accountName' ($Account)");
+            next;
+        }
+
+        $this->dbg("working on account ".$Account->name." of type ".$Account->type);
 
         if ($Account->type eq 'realm') {
-            $fnret = $Account->getRemoteAccountsNames();
-            $fnret or next;
+            $fnret = $Account->getRemoteAccounts();
+            if (!$fnret) {
+                $this->dbg("getRemoteAccounts failed: $fnret");
+                next;
+            }
 
-            foreach my $remoteAccountName (@{ $fnret->value || [] }) {
-                my $RemoteAccount = OVH::Bastion::Account->newFromName($remoteAccountName, type => "remote");
+            foreach my $RemoteAccount (@{ $fnret->value || [] }) {
                 push @list, ($p{'wantObjects'} ? $RemoteAccount : $RemoteAccount->name) if $RemoteAccount;
             }
         }
@@ -404,44 +441,42 @@ sub getKeys {
     return $fnret;
 }
 
-# don't memoize these funcs, as we already have proper cache (including invalidation) on the system group fetching
-# mechanics, and those are the slower pieces of code due to filesystem access
-sub hasOwner {
+_memoizify('sysGroupFromRole');
+sub sysGroupFromRole {
+    my ($this, $role, %p)     = @_;
+    $p{'role'} = $role;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ role }],
+    );
+    $fnret or return $fnret;
+
+    # look for the proper sysgroup depending on the requested role
+    my $sysGroupToCheck;
+    given ($p{'role'}) {
+        when (/^(member|guest|memberorguest)$/) { $sysGroupToCheck = $this->sysGroup; }
+        when ("owner") { $sysGroupToCheck = $this->sysGroupOwner; }
+        when ("aclkeeper") { $sysGroupToCheck = $this->sysGroupAclkeeper; }
+        when ("gatekeeper") { $sysGroupToCheck = $this->sysGroupGatekeeper; }
+        default { return R('ERR_INVALID_ARGUMENT', msg => "Unknown role '$p{'role'}'"); }
+    }
+    return R('OK', value => $sysGroupToCheck);
+}
+
+_memoizify('hasRole');
+sub hasRole {
     my ($this, $Account, %p)     = @_;
     $p{'Account'} = $Account;
     my $fnret = OVH::Bastion::check_args(\%p,
-        mandatory => [qw{ Account }],
+        mandatory => [qw{ Account role }],
         optionalFalseOk => [qw{ superowner }],
     );
     $fnret or return $fnret;
 
-    $fnret = $this->isExisting();
-    $fnret or return $fnret;
-
-    require OVH::Bastion::Account;
-    $fnret = $Account->isExisting();
-    $fnret or return $fnret;
-
-    $fnret = OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => $this->sysGroupOwner);
-    return R('OK', value => { superowner => 0 }) if $fnret;
-
-    # if superowner allowed, try it
-    if ($p{'superowner'} && $Account->isSuperOwner) {
-        osh_debug("is <".$Account->name."> owner of <".$this->name."> ? => no but superowner so YES!");
-        return R('OK', value => { superowner => 1 });
+    # superowner is not applicable to members or guests
+    if (exists $p{'superowner'} && none { $p{'role'} eq $_ } qw{ owner aclkeeper gatekeeper }) {
+        return R('ERR_INVALID_ARGUMENT', msg => "superowner is not supported for this role");
     }
 
-    return R('KO_NOT_GROUP_OWNER', msg => "Account '".$Account->name."' is not an owner of group '".$this->name."'");
-}
-
-sub hasGatekeeper {
-    my ($this, $Account, %p)     = @_;
-    $p{'Account'} = $Account;
-    my $fnret = OVH::Bastion::check_args(\%p,
-        mandatory => [qw{ Account }],
-    );
-    $fnret or return $fnret;
-
     $fnret = $this->isExisting();
     $fnret or return $fnret;
 
@@ -449,102 +484,143 @@ sub hasGatekeeper {
     $fnret = $Account->isExisting();
     $fnret or return $fnret;
 
-    $fnret = OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => $this->sysGroupGatekeeper);
-    return $fnret if $fnret->is_err;
-    return R('OK') if $fnret;
-    return R('KO_NOT_GROUP_GATEKEEPER', msg => "Account '".$Account->name."' is not a gatekeeper of group '".$this->name."'");
-}
-
-sub hasAclkeeper {
-    my ($this, $Account, %p)     = @_;
-    $p{'Account'} = $Account;
-    my $fnret = OVH::Bastion::check_args(\%p,
-        mandatory => [qw{ Account }],
-    );
+    # look for the proper sysgroup depending on the requested role
+    $fnret = $this->sysGroupFromRole($p{'role'});
     $fnret or return $fnret;
 
-    $fnret = $this->isExisting();
-    OVH::Bastion::osh_debug("Group($this)->hasAclkeeper($Account): this->isExisting==$fnret");
-    $fnret or return $fnret;
+    my $sysGroupToCheck = $fnret->value;
+    $fnret = OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => $sysGroupToCheck);
 
-    require OVH::Bastion::Account;
-    $fnret = $Account->isExisting();
-    OVH::Bastion::osh_debug("Group($this)->hasAclkeeper($Account): Account->isExisting==$fnret");
-    $fnret or return $fnret;
+    if (any { $p{'role'} eq $_ } qw{ owner aclkeeper gatekeeper }) {
+        # for owner aclkeeper gatekeeper, membership of the system group is enough
+        return R('OK', value => { superowner => 0 }) if $fnret;
 
-    $fnret = OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => $this->sysGroupAclkeeper);
-    OVH::Bastion::osh_debug("Group($this)->hasAclkeeper($Account): $fnret");
-    return $fnret if $fnret->is_err;
-    return R('OK') if $fnret;
-    return R('KO_NOT_GROUP_GATEKEEPER', msg => "Account '".$Account->name."' is not an aclkeeper of group '".$this->name."'");
-}
+        # otherwise, it also works if account is a superowner and superowner is allowed by our caller
+        if ($p{'superowner'} && $Account->isSuperOwner) {
+            return R('OK', value => { superowner => 1 });
+        }
 
-sub hasMemberOrGuest {
-    my ($this, $Account, %p)     = @_;
-    $p{'Account'} = $Account;
-    my $fnret = OVH::Bastion::check_args(\%p,
-        mandatory => [qw{ Account }],
-    );
-    $fnret or return $fnret;
-
-    $fnret = $this->isExisting();
-    $fnret or return $fnret;
-
-    require OVH::Bastion::Account;
-    $fnret = $Account->isExisting();
-    $fnret or return $fnret;
-
-    $fnret = OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => $this->sysGroup);
-    return $fnret if $fnret->is_err;
-    if ($fnret->is_ko) {
-        return R('KO_NOT_GROUP_MEMBER_NOR_GUEST', msg => "Account '".$Account->name."' is not a member nor guest of group '".$this->name."'");
+        # otherwise, game over
+        return R('KO_NOT_GROUP_'.uc($p{'role'}),
+            msg => "Account '$Account' doesn't have the '$p{'role'}' role on group '$this'");
     }
-    return R('OK');
-}
 
-_memoizify('hasMember');
-sub hasMember {
-    my ($this, $Account, %p)     = @_;
-    $p{'Account'} = $Account;
-    my $fnret = OVH::Bastion::check_args(\%p,
-        mandatory => [qw{ Account }],
-    );
-    $fnret or return $fnret;
+    # for member and guest, membership of the system group is always required
+    return R('KO_NOT_GROUP_'.uc($p{'role'}),
+        msg => "Account '$Account' is not a $p{'role'} of group '$this'") if !$fnret;
 
-    $fnret = $this->hasMemberOrGuest($Account);
-    $fnret or return $fnret;
-
-    # do they have the allowed.ip symlink?
-    my $prefix = $Account->remoteName ? "allowed_".$Account->remoteName : "allowed";
-    if (-l "/home/allowkeeper/".$Account->sysUser."/$prefix.ip.".$this->name) { # FIXME shouldn't be there
+    if ((any { $p{'role'} eq $_ } qw{ member memberorguest }) && -l $Account->allowedMemberFile($this)) {
         # -l => test that file exists and is a symlink
         # -r => test that the symlink dest still exists => REMOVED, because we (the caller) might not have the right
         #       to read the file if we're not member or guest ourselves
         return R('OK');
     }
-
-    return R('KO_NOT_GROUP_MEMBER', msg => "Account '".$Account->name."' is not a member of group '".$this->name."'");
-}
-
-_memoizify('hasGuest');
-sub hasGuest {
-    my ($this, $Account, %p)     = @_;
-    $p{'Account'} = $Account;
-    my $fnret = OVH::Bastion::check_args(\%p,
-        mandatory => [qw{ Account }],
-    );
-    $fnret or return $fnret;
-
-    $fnret = $this->hasMemberOrGuest($Account);
-    $fnret or return $fnret;
-
-    # do they have the allowed.partial file?
-    my $prefix = $Account->remoteName ? "allowed_".$Account->remoteName : "allowed";
-    if (-f "/home/allowkeeper/".$Account->sysUser."/$prefix.partial.".$this->name) { # FIXME shouldn't be there
+    elsif ((any { $p{'role'} eq $_ } qw{ guest memberorguest }) && -f $Account->allowedGuestFile($this)) {
         return R('OK');
     }
 
-    return R('KO_NOT_GROUP_GUEST', msg => "Account '".$Account->name."' is not a guest of group '".$this->name."'");
+    return R('KO_NOT_GROUP_'.uc($p{'role'}), msg => "Account '$Account' is not a $p{'role'} of group '$this'");
+}
+
+sub hasOwner         { my ($this, $A, %p) = @_; $p{'role'} = "owner";         return $this->hasRole($A, %p); }
+sub hasGatekeeper    { my ($this, $A, %p) = @_; $p{'role'} = "gatekeeper";    return $this->hasRole($A, %p); }
+sub hasAclkeeper     { my ($this, $A, %p) = @_; $p{'role'} = "aclkeeper";     return $this->hasRole($A, %p); }
+sub hasMemberOrGuest { my ($this, $A, %p) = @_; $p{'role'} = "memberorguest"; return $this->hasRole($A, %p); }
+sub hasMember        { my ($this, $A, %p) = @_; $p{'role'} = "member";        return $this->hasRole($A, %p); }
+sub hasGuest         { my ($this, $A, %p) = @_; $p{'role'} = "guest";         return $this->hasRole($A, %p); }
+
+_memoizify('getConfig');
+sub getConfig {
+    my ($this, $key, %p) = @_;
+
+    my $fnret = OVH::Bastion::check_args(\%p);
+    $fnret or return $fnret;
+
+    $fnret = $this->check();
+    $fnret or return $fnret;
+
+    if ($key =~ /^([a-zA-Z0-9_-]+)$/) {
+        $key = $1; # untaint
+    }
+    else {
+        return R('ERR_INVALID_PARAMETER', msg => "Invalid configuration key asked ($key)");
+    }
+
+    my $filename = $this->home."/$key.config";
+    my $fh;
+    if (!open($fh, '<', $filename)) {
+        return R('ERR_CANNOT_OPEN_FILE', msg => "Error while trying to open file $filename for read ($!)");
+    }
+    my $getvalue = do { local $/ = undef; <$fh> };
+    close($fh);
+    return R('OK', value => $getvalue);
+}
+
+sub setConfig {
+    my ($this, $key, $value, %p) = @_;
+
+    my $fnret = OVH::Bastion::check_args(\%p);
+    $fnret or return $fnret;
+
+    if ($key =~ /^([a-zA-Z0-9_-]+)$/) {
+        $key = $1; # untaint
+    }
+    else {
+        return R('ERR_INVALID_PARAMETER', msg => "Invalid configuration key asked ($key)");
+    }
+
+    my $filename = $this->home."/$key.config";
+
+    # be nice and delete the cache of getConfig
+    if (delete $CACHE{refaddr($this)."!getConfig!$key"}) {
+        $this->dbg("successfully deleted getConfig cache for $key");
+    }
+
+    unlink($filename);    # remove any previous value
+    my $fh;
+    # sysopen: avoid symlink attacks
+    if (!sysopen($fh, $filename, O_RDWR | O_CREAT | O_EXCL)) {
+        return R('ERR_CANNOT_OPEN_FILE', msg => "Error while trying to open file $filename for write ($!)");
+    }
+    print $fh $value;
+    close($fh);
+    chmod 0644, $filename;
+    chown $this->gid, $this->gid, $filename;
+    return R('OK');
+}
+
+sub deleteConfig {
+    my ($this, $key, %p) = @_;
+
+    my $fnret = OVH::Bastion::check_args(\%p);
+    $fnret or return $fnret;
+
+    $fnret = $this->check();
+    $fnret or return $fnret;
+
+    if ($key =~ /^([a-zA-Z0-9_-]+)$/) {
+        $key = $1; # untaint
+    }
+    else {
+        return R('ERR_INVALID_PARAMETER', msg => "Invalid configuration key asked ($key)");
+    }
+
+    my $filename = $this->home."/$key.config";
+
+    # be nice and delete the cache of getConfig
+    if (delete $CACHE{refaddr($this)."!getConfig!$key"}) {
+        $this->dbg("successfully deleted getConfig cache for $key");
+    }
+
+    if (unlink($filename)) {
+        return R('OK');
+    }
+    elsif ($! =~ /no such file/i) {
+        return R('OK_NO_CHANGE');
+    }
+    else {
+        return R('ERR_DELETION_FAILED', msg => "Couldn't delete $this config $key: $!");
+    }
 }
 
 1;

@@ -73,7 +73,7 @@ sub log_and_exit {
     my ($self, $code, $msg, $body, $params) = @_;
     $params->{'returnvalue'} ||= "$code $msg";
 
-    my $account              = delete $self->{'_log'}{'account'};
+    my $Account              = delete $self->{'_log'}{'Account'};
     my $user                 = delete $self->{'_log'}{'user'};
     my $hostto               = delete $self->{'_log'}{'hostto'};
     my $portto               = delete $self->{'_log'}{'portto'};
@@ -84,7 +84,7 @@ sub log_and_exit {
 
     # log in sql and/or logfile and/or syslog
     my $processing_delay = ($starttime ? int(Time::HiRes::tv_interval($starttime) * 1_000_000) : undef);
-    $params->{'account'} = $account;   # might be undef if we're called before the account is extracted from the payload
+    $params->{'Account'} = $Account;   # might be undef if we're called before the account is extracted from the payload
     $params->{'user'}    = $user;      # ditto
     $params->{'hostto'}  = $hostto;    # ditto
     $params->{'portto'}  = $portto;    # ditto
@@ -378,7 +378,7 @@ sub process_http_request {
     }
 
     # in our case, the LOGIN should in fact be of the form bastion_account@remote_login_expression@remote_host_to_connect_to,
-    # where remote_login_expression can be one of "$user", "group=$shortGroup,user=$user" or "user=$user"
+    # where remote_login_expression can be one of "$user", "group=$Group->name,user=$user" or "user=$user"
     my ($loginpart, $pass) = ($1, $2);    ## no critic (ProhibitCaptureWithoutTest)
     if ($loginpart !~ m{^([^@]+)@([^@]+)@([0-9a-zA-Z._-]+)(%(\d+))?$}) {    ## no critic (ProhibitUnusedCapture)
         return $self->log_and_exit(
@@ -451,7 +451,7 @@ sub process_http_request {
             {comment => "invalid_credentials"}
         );
     }
-    $self->{'_log'}{'account'} = $Account->name;
+    $self->{'_log'}{'Account'} = $Account;
 
     if ($user !~ /^[a-zA-Z0-9._-]+/) {
         return $self->log_and_exit(

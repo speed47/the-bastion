@@ -43,28 +43,17 @@ if (!$group) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing parameter 'group'";
 }
 
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-$fnret or osh_exit $fnret;
+my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+$Group or osh_exit $Group;
 
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
-
-if (   !OVH::Bastion::is_group_member(group => $shortGroup, account => $Self->name)
-    && !OVH::Bastion::is_group_aclkeeper(group => $shortGroup, account => $Self->name, superowner => 1)
-    && !$Self->isAuditor)
-{
-    osh_exit(
-        R(
-            'KO_ACCESS_DENIED',
-            msg =>
-              "Sorry, you're neither a member or aclkeeper of group $shortGroup, you can't list the servers of this group.\n"
+if (   !$Group->hasMember($Self) && !$Group->hasAclkeeper($Self, superowner => 1) && !$Self->isAuditor) {
+    osh_exit(R('KO_ACCESS_DENIED', msg => "Sorry, you're neither a member or aclkeeper of group $Group, "
+            ." you can't list the servers of this group.\n"
               . "If you think you should be able to, use groupInfo to get contact info."
-        )
-    );
+        ));
 }
 
-$fnret = OVH::Bastion::get_acl_way(way => 'group', group => $shortGroup);
+$fnret = OVH::Bastion::get_acl_way(way => 'group', group => $Group->name);
 $fnret or osh_exit $fnret;
 
 if (not @{$fnret->value}) {
@@ -75,7 +64,7 @@ if (not @{$fnret->value}) {
 }
 
 OVH::Bastion::print_acls(
-    acls     => [{type => 'group', group => $shortGroup, acl => $fnret->value}],
+    acls     => [{type => 'group', group => $Group->name, acl => $fnret->value}],
     reverse  => $reverse,
     includes => \@includes,
     excludes => \@excludes

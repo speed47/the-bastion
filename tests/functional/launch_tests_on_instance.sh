@@ -549,21 +549,26 @@ nocontain()
     fi
 }
 
-configchg()
-{
-    success configchange $r0 perl -pe "$*" -i "$opt_remote_etc_bastion/bastion.conf"
-}
-
-onfigsetquoted()
-{
-    success configset $r0 perl -pe 's=^\\\\x22'"$1"'\\\\x22.+=\\\\x22'"$1"'\\\\x22:\\\\x22'"$2"'\\\\x22,=' -i "$opt_remote_etc_bastion/bastion.conf"
-}
-
 configset()
 {
-    success configset $r0 perl -pe 's=^\\\\x22'"$1"'\\\\x22.+=\\\\x22'"$1"'\\\\x22:'"$2"',=' -i "$opt_remote_etc_bastion/bastion.conf"
+    # to set a boolean: configset configkey true
+    #                or configset configkey false
+    # to set a string:  configset configkey "\\\"string $expandedvar value\\\""
+    # to set an array:  configset configkey "[\\\"$account0\\\",\\\"$account1\\\"]"
+    #
+    # escape hell at it's finest.
+    local CONFIG_JSON_PLACEHOLDER="_JSON_REPLACE_"
+    run configset_"$1" $r0 perl -I/opt/bastion/lib/perl -MOVH::Bastion -MJSON -e \""'
+        my \\\$C=OVH::Bastion::load_configuration() or die(\\\$C);
+        \\\$C->value->{'\\\"$1\\\"'}='$CONFIG_JSON_PLACEHOLDER';
+        my \\\$str = encode_json(\\\$C->value);
+        \\\$str =~ s{\\\"$CONFIG_JSON_PLACEHOLDER\\\"}{$2};
+        open(FH,\\\">\\\",\\\"$opt_remote_etc_bastion/bastion.conf\\\") or die(\\\$!);
+        print FH \\\$str;
+        close FH;
+    '"\"
+    retvalshouldbe 0
 }
-
 
 sshclientconfigchg()
 {
@@ -577,6 +582,8 @@ runtests()
     # ensure syslog is clean
     ignorecodewarn 'Configuration error' # previous unit tests can provoke this
     success syslog_cleanup $r0 "\": > /var/log/bastion/bastion.log\""
+
+    configset debug true
 
     # backup the original default configuration on target side
     now=$(date +%s)

@@ -59,8 +59,8 @@ $fnret = OVH::Bastion::Plugin::generateEgressKey::preconditions(
 $fnret or HEXIT($fnret);
 
 # get returned untainted values
-my ($shortGroup, $keyhome);
-($group, $algo, $size, $shortGroup, $keyhome) = @{$fnret->value}{qw{ group algo size shortGroup keyhome}};
+my $keyhome;
+($algo, $size, $keyhome) = @{$fnret->value}{qw{ algo size keyhome}};
 
 my $passphrase = '';
 if ($encrypted) {
@@ -85,7 +85,7 @@ if (!$keykeeper_uid || !$group_gid) {
 osh_info "Generating a new key pair, this might take a while...";
 $fnret = OVH::Bastion::generate_ssh_key(
     folder         => $keyhome,
-    prefix         => $shortGroup,
+    prefix         => $Group->name,
     algo           => $algo,
     size           => $size,
     passphrase     => $passphrase,
@@ -109,7 +109,7 @@ OVH::Bastion::syslogFormatted(
     type     => 'group',
     fields   => [
         [action          => 'generate_egress_key'],
-        [group           => $shortGroup],
+        [group           => $Group->name],
         [self            => $self],
         [key_id          => $key->{'id'}],
         [key_algo        => $key->{'typecode'}],

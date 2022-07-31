@@ -66,13 +66,10 @@ if ($ttl == -1) {
       "Invalid TTL (-1), expected an amount of seconds, or a duration string such as '2d8h15m'";
 }
 
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => 'key');
+my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
 $fnret or osh_exit $fnret;
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
 
-$fnret = OVH::Bastion::is_group_owner(account => $Self->name, group => $shortGroup, superowner => 1);
-if (!$fnret) {
+if (!$Group->hasOwner($Self, superowner => 1)) {
     osh_exit 'ERR_NOT_GROUP_OWNER', "You must be an owner to modify this group";
 }
 
@@ -82,10 +79,10 @@ if (defined $mfaRequired && !grep { $mfaRequired eq $_ } qw{ password totp any n
 }
 
 my @command = qw{ sudo -n -u };
-push @command, $group;
+push @command, $Group->sysGroup;
 push @command, qw{ -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupModify';
-push @command, '--group', $group;
+push @command, '--group', $Group->name;
 push @command, '--mfa-required', $mfaRequired if $mfaRequired;
 push @command, '--guest-ttl-limit', $ttl if defined $ttl;
 push @command, '--idle-lock-timeout', $idleLockTimeout if defined $idleLockTimeout;

@@ -77,8 +77,8 @@ sub preconditions {
     my            ($Self, $Group, $algo, $size, $Account, $context) =
       @params{qw{  Self  Group algo   size   Account   context}};
 
-    if (!$algo || !$context) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing argument algo[$algo] or context[$context]");
+    if (!$algo || !$context || !$Self) {
+        return R('ERR_MISSING_PARAMETER', msg => "Missing argument algo[$algo] or context[$context] or Self[$Self]");
     }
 
     if (!grep { $context eq $_ } qw{ group account }) {

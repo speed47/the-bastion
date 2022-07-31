@@ -13,7 +13,7 @@ my $_pw_all_cached = 0;
 my %_gr_cache;
 my $_gr_all_cached = 0;
 
-sub _clear_cache {
+sub sys_clear_cache {
     my $category = shift;
     OVH::Bastion::osh_warn(
         "clear_cache $category, got " . (scalar keys %_pw_cache) . " pw and " . (scalar keys %_gr_cache) . " gr");
@@ -21,12 +21,12 @@ sub _clear_cache {
     # as we're caching functions that usually return OVH::Result objects, and those
     # objects are locked, we get yelled at if we try to empty the cache hashes
     # without unlocking everything first
-    if ($category eq 'users') {
+    if (!$category || $category eq 'users') {
         unlock_hashref_recurse(\%_pw_cache);
         %_pw_cache      = ();
         $_pw_all_cached = 0;
     }
-    elsif ($category eq 'groups') {
+    if (!$category || $category eq 'groups') {
         unlock_hashref_recurse(\%_gr_cache);
         %_gr_cache      = ();
         $_gr_all_cached = 0;
@@ -171,9 +171,9 @@ sub sys_useradd {
     }
 
     # we're adding a user, clear cache
-    _clear_cache('users');
+    sys_clear_cache('users');
     # adding a user also create their primary group
-    _clear_cache('groups');
+    sys_clear_cache('groups');
 
     $p{'cmd'}          = \@cmd;
     $p{'must_succeed'} = 1;
@@ -208,7 +208,7 @@ sub sys_groupadd {
     }
 
     # we're adding a group, clear cache
-    _clear_cache('groups');
+    sys_clear_cache('groups');
 
     $p{'cmd'}          = \@cmd;
     $p{'must_succeed'} = 1;
@@ -263,9 +263,9 @@ sub sys_userdel {
     }
 
     # we're removing a user, clear cache
-    _clear_cache('users');
+    sys_clear_cache('users');
     # removing a user also removes their primary group
-    _clear_cache('groups');
+    sys_clear_cache('groups');
 
     $p{'cmd'}          = \@cmd;
     $p{'must_succeed'} = 1;
@@ -296,7 +296,7 @@ sub sys_groupdel {
     }
 
     # we're removing a group, clear cache
-    _clear_cache('groups');
+    sys_clear_cache('groups');
 
     $p{'cmd'}          = \@cmd;
     $p{'must_succeed'} = 1;
@@ -338,7 +338,7 @@ sub sys_addmembertogroup {
     }
 
     # we're adding a user to a group, clear the group cache
-    _clear_cache('groups');
+    sys_clear_cache('groups');
 
     $p{'cmd'}          = \@cmd;
     $p{'must_succeed'} = 1;
@@ -424,7 +424,7 @@ sub sys_delmemberfromgroup {
     }
 
     # we're removing a user from a group, clear the group cache
-    _clear_cache('groups');
+    sys_clear_cache('groups');
 
     $p{'cmd'}          = \@cmd;
     $p{'must_succeed'} = 1;
@@ -471,7 +471,7 @@ sub sys_changepassword {
     }
 
     # we're changing the password of a user, which changes their passwd entry, clear cache
-    _clear_cache('users');
+    sys_clear_cache('users');
 
     $p{'stdin_str'}    = $stdin_str if defined $stdin_str;
     $p{'cmd'}          = \@cmd;
@@ -510,7 +510,7 @@ sub sys_neutralizepassword {
     }
 
     # we're changing the password of a user, which changes their passwd entry, clear cache
-    _clear_cache('users');
+    sys_clear_cache('users');
 
     $p{'stdin_str'}    = $stdin_str if defined $stdin_str;
     $p{'cmd'}          = \@cmd;
@@ -561,7 +561,7 @@ sub sys_setpasswordpolicy {
         return R('OK_IGNORED');
     }
     # we're changing the policy of a user, which changes their passwd entry, clear cache
-    _clear_cache('users');
+    sys_clear_cache('users');
 
     $p{'cmd'}          = \@cmd;
     $p{'must_succeed'} = 1;
@@ -862,16 +862,19 @@ sub sys_getgr_name {
     # if and our $name entry exists in cache, return it
     if (exists $_gr_cache{$name}) {
         if (defined $_gr_cache{$name}) {
+            print "MIGRA getgrname cached $name\n";
             return R('OK', value => $_gr_cache{$name});
         }
         else {
             # we cached its non-existence
+            print "MIGRA getgrname negative cached $name\n";
             return R('KO_NOT_FOUND', msg => "Group '$name' doesn't exist");
         }
     }
     # cache has been filled but our name entry is not
     # there, it means the group doesn't exist
     elsif ($_gr_all_cached) {
+        print "MIGRA getgrname allcache negative cached $name\n";
         return R('KO_NOT_FOUND', msg => "Group '$name' doesn't exist");
     }
     # cache has not been filled and our entry doesn't
@@ -889,11 +892,13 @@ sub sys_getgr_name {
             gid     => $fields[2],
             members => [split(/ /, $fields[3])],
         };
+        print "MIGRA getgrname justloaded $name\n";
         return R('OK', value => $_gr_cache{$fields[0]});
     }
     else {
         # cache the non-existence of this group
         $_gr_cache{$name} = undef;
+        print "MIGRA getgrname justloaded nonex $name\n";
         return R('KO_NOT_FOUND', msg => "Group '$name' doesn't exist");
     }
 

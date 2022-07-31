@@ -116,19 +116,17 @@ $Account
     {comment => "invalid_account"}
   );
 
-$log_params{'account'} = $Account->name;
+$log_params{'Account'} = $Account;
 $log_params{'user'}    = $user;
 $log_params{'hostto'}  = $remotemachine;
 $log_params{'params'}  = $path;
 $log_params{'plugin'}  = uc($method);
 push @{$log_params{'custom'}}, ['post_length' => length($content)];
 
-my $shortGroup;
+my $Group;
 if ($group) {
-    $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => 'key');
+    $fnret = OVH::Bastion::Group->newFromName($Group);
     $fnret or log_and_exit(400, "Bad Request (bad group)", "Group name is invalid", {comment => "invalid_group"});
-    $shortGroup = $fnret->value->{'shortGroup'};
-    $group      = $fnret->value->{'group'};
 }
 
 if (!OVH::Bastion::is_valid_port(port => $remoteport)) {
@@ -223,7 +221,7 @@ undef $storedhash;
 my $authmode;
 my $hint;
 if ($context eq 'group') {
-    $hint     = $shortGroup;
+    $hint     = $Group->name;
     $authmode = 'group/explicit';
 }
 elsif ($context eq 'self') {
@@ -235,7 +233,7 @@ elsif (-f "/home/passkeeper/$user") {
     $context  = 'legacy';
     $authmode = 'legacy';
 }
-elsif (OVH::Bastion::is_valid_group_and_existing(group => $user, groupType => "key")) {
+elsif (OVH::Bastion::Group->newFromName($user, check => 1)) {
     $hint     = $user;
     $context  = 'group';
     $authmode = 'group/guessed';

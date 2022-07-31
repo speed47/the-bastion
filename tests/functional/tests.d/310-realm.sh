@@ -159,6 +159,7 @@ testsuite_realm()
 
     # revoke group membership
     success del_account1_as_member $a0 --osh groupDelMember --group $group1 --account $realm_shared_account/$account1
+    json .e ERROR
     json .error_code OK
 
     success del_account1_as_member_dup $a0 --osh groupDelMember --group $group1 --account $realm_shared_account/$account1

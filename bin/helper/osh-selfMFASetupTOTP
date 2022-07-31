@@ -34,26 +34,17 @@ OVH::Bastion::Helper::check_spurious_args();
 if (not $account) {
     HEXIT('ERR_MISSING_PARAMETER', msg => "Missing argument 'account'");
 }
+my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+$Account or HEXIT($Account);
 
-#>RIGHTSCHECK
-if ($self eq 'root') {
+if ($Self->isLocalRoot) {
     osh_debug "Real root, skipping checks of permissions";
 }
-elsif ($self ne $account) {
-    HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $self");
+elsif ($Self ne $Account) {
+    HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $Self");
 }
 
-#<RIGHTSCHECK
-
-#>PARAMS:ACCOUNT
-osh_debug("Checking account");
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-$fnret or HEXIT($fnret);
-$account = $fnret->value->{'account'};    # untainted
-
-#<PARAMS:ACCOUNT
-
-$fnret = OVH::Bastion::sys_addmembertogroup(user => $account, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP);
+$fnret = OVH::Bastion::sys_addmembertogroup(user => $Account->sysUser, group => OVH::Bastion::MFA_TOTP_CONFIGURED_GROUP);
 $fnret or HEXIT($fnret);
 
 HEXIT('OK');

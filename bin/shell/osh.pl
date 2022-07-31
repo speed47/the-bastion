@@ -69,7 +69,7 @@ sub main_exit {
 
     # if, this is an early exit, we didn't log anything yet in the sql, do it now
     OVH::Bastion::log_access_insert(
-        account     => $Self->isa('OVH::Bastion::Account') ? $Self->name : OVH::Bastion::get_user_from_env()->value,
+        Account     => $Self,
         cmdtype     => 'abort',
         allowed     => undef,
         ipfrom      => $ipfrom,
@@ -83,7 +83,7 @@ sub main_exit {
         portto      => undef,
         user        => undef,
         plugin      => undef,
-        params      => join('^', @ARGV),
+        params      => "['" . join("','", @ARGV) . "']",
         comment     => $comment,
         uniqid      => $log_uniq_id
     ) if (not defined $log_db_name or not defined $log_insert_id);
@@ -115,7 +115,7 @@ $fnret or main_exit(OVH::Bastion::EXIT_CONFIGURATION_FAILURE, "configuration_fai
 my $config = $fnret->value;
 
 my $bastionName = $config->{'bastionName'};
-my $osh_debug   = $config->{'debug'};
+my $debug       = $config->{'debug'};
 
 # check for account existence and validity
 $fnret = $Self->selfCheck();
@@ -226,23 +226,22 @@ if (not $result) {
     main_exit OVH::Bastion::EXIT_UNKNOWN_COMMAND, "unknown_command", "Bad command";
 }
 
-$osh_debug = 1 if $opt_debug;    # osh_debug was already 1 if specified in config file
+# debug was already 1 if specified in config file
+$debug = 1 if $opt_debug;
 
 # per-user debug ?
 $fnret = $Self->getConfig("private/debug");
 if ($fnret and $fnret->value() =~ /yes/) {
-    $osh_debug = 1;
+    $debug = 1;
 }
 
-$ENV{'OSH_DEBUG'} = 1 if $osh_debug;
+$ENV{'OSH_DEBUG'} = 1 if $debug;
 
-osh_debug(
-    sprintf(
-        "self=%s home=%s realm=%s remoteself=%s sysself=%s",
-        $Self->name, $Self->home, $Self->realm, $Self->remoteName, $Self->sysUser
-    )
-);
-osh_debug("user-passed options : $realOptions");
+osh_debug(sprintf(
+    "Self(name=%s,type=%s,realm=%s,remoteName=%s,sysUser=%s)",
+    $Self->name, $Self->type, $Self->realm, $Self->remoteName, $Self->sysUser
+));
+osh_debug("user-passed options: <$realOptions>");
 
 #
 #   Command params
@@ -386,7 +385,7 @@ if (!$quiet && $Self->realm && !$ENV{'OSH_IN_INTERACTIVE_SESSION'}) {
     print colored("-" x (length($welcome) - 3 * 9) . "\n", "bold yellow");
     print "\n";
 }
-osh_debug("remainingOptions <" . join('/', @$remainingOptions) . ">");
+osh_debug("remainingOptions ['" . join("','", @$remainingOptions) . "']");
 
 if (defined $afterOptions and @$remainingOptions > 1) {
 
@@ -402,7 +401,7 @@ if (not defined $afterOptions and @$remainingOptions > 1 and not $osh_command) {
 
 if ($afterOptions) {
     push @$remainingOptions, split(/ /, $afterOptions);
-    osh_debug("remainingOptionsAfterAdd <" . join('/', @$remainingOptions) . ">");
+    osh_debug("remainingOptionsAfterAdd ['" . join("','", @$remainingOptions) . "']");
 }
 
 if ($json_pretty) {
@@ -473,7 +472,7 @@ if ($interactive and not $ENV{'OSH_IN_INTERACTIVE_SESSION'}) {
     }
 
     my $logret = OVH::Bastion::log_access_insert(
-        account     => $Self->name,
+        Account     => $Self,
         cmdtype     => 'interactive',
         allowed     => 1,
         ipfrom      => $ipfrom,
@@ -527,13 +526,11 @@ my $command;
 if ($osh_command) {
     ($help)      and $ENV{'PLUGIN_HELP'}  = 1;
     ($quiet)     and $ENV{'PLUGIN_QUIET'} = 1;
-    ($osh_debug) and $ENV{'PLUGIN_DEBUG'} = 1;
-    ($debug)     and $ENV{'PLUGIN_DEBUG'} = 1;
-    osh_debug('Going got pass the following supplement args to plugin: ' . join('^', @$remainingOptions));
+    osh_debug("Going to pass the following supplement args to plugin: ['" . join("','", @$remainingOptions) . "']");
 }
 else {
     # it's ssh or telnet =>  it may remain at least 'host' or 'user@host'
-    osh_debug("Remaining options " . join('/', @$remainingOptions));
+    osh_debug("Remaining options ['" . join("','", @$remainingOptions) . "']");
     if ($remainingOptionsCounter == 0) {
         if (!$host) {
             help();
@@ -564,7 +561,7 @@ else {
 
     if ($remainingOptionsCounter > 0) {
         $command .= join(' ', @$remainingOptions);
-        osh_debug("Going to add extra command $command");
+        osh_debug("Going to add extra command <$command>");
     }
 }
 
@@ -608,8 +605,6 @@ if (!$fnret) {
 else {
     $ip = $fnret->value->{'ip'};
 }
-
-osh_debug("will work on IP $ip");
 
 # Check if we got a telnet or ssh password user
 my $userPasswordClue;
@@ -749,23 +744,16 @@ if ($mfaPolicy ne 'disabled' && !grep { $osh_command eq $_ } qw{ selfMFASetupPas
 
 # /MFA enforcing
 
-osh_debug("self     : "
-      . (defined $Self->name ? $Self->name : '<undef>') . "\n"
-      . "user       : "
-      . (defined $user ? $user : '<undef>') . "\n"
-      . "host       : "
-      . (defined $host ? $host : '<undef>') . "\n"
-      . "port       : "
-      . (defined $port ? $port : '<undef>') . "\n"
-      . "verbose    : "
-      . (defined $verbose ? $verbose : '<undef>') . "\n"
-      . "tty        : "
-      . (defined $tty ? $tty : '<undef>') . "\n"
-      . "osh        : "
-      . (defined $osh_command ? $osh_command : '<undef>') . "\n"
-      . "command    : "
-      . (defined $command ? $command : '<undef>')
-      . "\n");
+osh_debug(sprintf("Resolved parameters: ip=%s user=%s host=%s port=%s verbose=%s tty=%s osh=%s command=%s",
+        ($ip   // '<u>'),
+        ($user // '<u>'),
+        ($host // '<u>'),
+        ($port // '<u>'),
+        ($verbose // '<u>'),
+        ($tty // '<u>'),
+        ($osh_command // '<u>'),
+        ($command // '<u>'),
+));
 
 my $hostto = $host;
 if ($host) {
@@ -776,7 +764,7 @@ if ($host) {
 if ($sshAs) {
     $fnret = $Self->isAdmin;
     my $logret = OVH::Bastion::log_access_insert(
-        account     => $Self->name,
+        Account     => $Self,
         cmdtype     => 'sshas',
         allowed     => $fnret ? 1 : 0,
         ipfrom      => $ipfrom,
@@ -790,7 +778,7 @@ if ($sshAs) {
         portto      => $optPort,
         user        => $user,
         plugin      => undef,
-        params      => join(' ', @$remainingOptions),
+        params      => "['" . join("','", @$remainingOptions) . "']",
         comment     => undef,
         uniqid      => $log_uniq_id
     );
@@ -832,7 +820,7 @@ if ($sshAs) {
             ['account' => $Self->name],
             ['sudo-as', $AccountSshAs->name],
             ['plugin',  'ssh'],
-            ['params', join(" ", @forwardOptions)]
+            ['params', "['" . join("','", @forwardOptions) . "']"],
         ]
     );
 
@@ -886,7 +874,7 @@ if ($osh_command) {
     $fnret = $Self->canExecutePlugin($osh_command);
 
     my $logret = OVH::Bastion::log_access_insert(
-        account     => $Self->name,
+        Account     => $Self,
         cmdtype     => 'osh',
         allowed     => ($fnret ? 1 : 0),
         ipfrom      => $ipfrom,
@@ -900,7 +888,7 @@ if ($osh_command) {
         portto      => $optPort,
         user        => $user,
         plugin      => $osh_command,
-        params      => join(' ', @$remainingOptions),
+        params      => "['" . join("','", @$remainingOptions) . "']",
         comment     => 'plugin-' . ($fnret->value ? $fnret->value->{'type'} : 'UNDEF'),
         uniqid      => $log_uniq_id
     );
@@ -1125,7 +1113,7 @@ if (!$fnret) {
     }
 
     my $logret = OVH::Bastion::log_access_insert(
-        account     => $Self->name,
+        Account     => $Self,
         cmdtype     => $telnet ? 'telnet' : 'ssh',
         allowed     => 0,
         ipfrom      => $ipfrom,
@@ -1151,7 +1139,7 @@ if (!$fnret) {
 # else, keep calm and carry on
 my @accessList = @{$fnret->value || []};
 
-if ($osh_debug) {
+if ($debug) {
     require Data::Dumper;
     osh_debug("access list array:");
     osh_debug(Data::Dumper::Dumper(\@accessList));
@@ -1168,7 +1156,7 @@ my $ttyrec_fnret = OVH::Bastion::build_ttyrec_cmdline_part1of2(
     home          => $Self->home,
     realm         => $Self->realm,
     remoteaccount => $Self->remoteName,
-    debug         => $osh_debug,
+    debug         => $debug,
     tty           => $tty,
     notty         => $notty
 );
@@ -1485,7 +1473,7 @@ if ($bind) {
     push @command, '-b', $bind;
 }
 
-osh_debug("about to exec: " . join(' ', @ttyrec));
+osh_debug("about to exec: ['" . join("','", @ttyrec) . "']");
 
 # if --wait is specified, we wait for the host to be alive before connecting
 if ($wait) {
@@ -1507,7 +1495,7 @@ if ($wait) {
 }
 
 my $logret = OVH::Bastion::log_access_insert(
-    account     => $Self->name,
+    Account     => $Self,
     cmdtype     => $telnet ? 'telnet' : 'ssh',
     allowed     => 1,
     ipfrom      => $ipfrom,

@@ -84,11 +84,18 @@ if (!$group || !$owner) {
     osh_exit 'ERR_MISSING_PARAMETER', "Group name or owner is missing";
 }
 
+# check if algo is supported by system
+if ($algo) {
+    $algo  = lc($algo);
+    $fnret = OVH::Bastion::is_allowed_algo_and_size(algo => $algo, size => $size, way => 'egress');
+    $fnret or osh_exit $fnret;
+}
+
 # first, check that the name doesn't start with 'key' (see https://github.com/ovh/the-bastion/issues/178)
 # as the is_valid_group() internally automatically guesses whether the input is from a user (in that case
 # the $group is a bastion group name) or some other part of the code (in that case the $group might be
 # the name of the OS group mapped to the bastion group name, hence starting with 'key')
-if ($group =~ /^key/) {
+if ($group =~ /^key/) { # FIXME MIGRA remove this
     osh_exit 'ERR_INVALID_PARAMETER', "The group name can't start with 'key' (reserved prefix)";
 }
 
@@ -101,27 +108,18 @@ if (!$no_key && (!$algo || !$size)) {
     osh_exit 'ERR_MISSING_PARAMETER', "Group algorithm or size is missing";
 }
 
-$fnret = OVH::Bastion::is_valid_group(group => $group, groupType => "key");
-$fnret or osh_exit($fnret);
+my $Group = OVH::Bastion::Group->newFromName($group);
+$Group or osh_exit($Group); # invalid name
 
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
-
-# check if algo is supported by system
-if ($algo) {
-    $algo  = lc($algo);
-    $fnret = OVH::Bastion::is_allowed_algo_and_size(algo => $algo, size => $size, way => 'egress');
-    $fnret or osh_exit $fnret;
+if ($Group->isExisting) {
+    osh_exit(R('ERR_GROUP_ALREADY_EXISTS', msg => "The group $group already exists"));
 }
 
-#
-# Now create it
-#
 
+# Now create it
 my @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupCreate';
-push @command, "--group", $group, "--owner", $owner;
+push @command, "--group", $Group->name, "--owner", $owner;
 push @command, "--algo", $algo if $algo;
 push @command, "--size", $size if $size;
 push @command, "--encrypted" if $encrypted;
@@ -140,25 +138,25 @@ if ($no_key) {
 else {
     osh_info 'Group creation complete! The public key of this group is:';
     $fnret = OVH::Bastion::get_bastion_ips();
-    my $from;
-    if ($fnret) {
-        my @ips = @{$fnret->value};
-        $from = 'from="' . join(',', @ips) . '"';
-    }
+    $fnret or osh_exit($fnret);
 
-    my $Group = OVH::Bastion::Group->newFromName($group);
-    $Group->refresh();
+    my $from = 'from="' . join(',', @{$fnret->value}) . '"';
+
+    $fnret = $Group->refresh(); # now that we created the group, refresh its info
+    $fnret or osh_exit($fnret);
+
     $fnret = $Group->check();
+    $fnret or osh_exit($fnret);
 
     $fnret = $Group->getKeys();
-    if ($fnret and $from) {
-        foreach my $keyfile (@{$fnret->value->{'sortedKeys'}}) {
-            my $key = $fnret->value->{'keys'}{$keyfile};
-            unlock_value(%$key, 'prefix');
-            $key->{'prefix'} = $from;
-            OVH::Bastion::print_public_key(key => $key);
-            $result_hash->{'public_key'} = $key;
-        }
+    $fnret or osh_exit($fnret);
+
+    foreach my $keyfile (@{$fnret->value->{'sortedKeys'}}) {
+        my $key = $fnret->value->{'keys'}{$keyfile};
+        unlock_value(%$key, 'prefix');
+        $key->{'prefix'} = $from;
+        OVH::Bastion::print_public_key(key => $key);
+        $result_hash->{'public_key'} = $key;
     }
 }
 

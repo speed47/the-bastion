@@ -43,17 +43,13 @@ if (!$group) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing 'group' parameter";
 }
 
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-$fnret or osh_exit($fnret);
+my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+$Group or osh_exit($Group);
 
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
-
-$fnret = OVH::Bastion::is_group_owner(group => $shortGroup, account => $Self->name, superowner => 1);
+$fnret = $Group->hasOwner($Self, superowner => 1);
 if (!$fnret) {
     osh_exit 'ERR_NOT_GROUP_OWNER',
-      "Sorry, you're not an owner of group $shortGroup, which is needed to being able to delete it";
+      "Sorry, you're not an owner of group $Group, which is needed to being able to delete it";
 }
 
 if (!$noConfirm) {
@@ -70,13 +66,13 @@ EOS
     ## use critic
     chomp $sentence;
 
-    if ($sentence ne $shortGroup) {
+    if ($sentence ne $Group->name) {
         osh_exit 'ERR_OPERATOR_IS_DRUNK', "You're drunk, apparently, aborted.";
     }
 }
 
 my @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupDelete';
-push @command, "--group", $group;
+push @command, "--group", $Group->sysGroup;
 
 osh_exit OVH::Bastion::helper(cmd => \@command);

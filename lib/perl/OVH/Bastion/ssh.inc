@@ -847,15 +847,12 @@ sub ssh_ingress_keys_piv_apply {
     if (not $action) {
         return R('ERR_MISSING_PARAMETER', msg => "Argument 'action' is required");
     }
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-    $fnret or return $fnret;
-
-    $account = $fnret->value->{'account'};
-    my $dir = $fnret->value->{'home'};
+    my $Account = OVH::Bastion::Account->newFromName($account);
+    $Account or return $Account;
 
     $fnret = OVH::Bastion::get_authorized_keys_from_file(
-        account            => $account,
-        file               => $dir . '/' . OVH::Bastion::AK_FILE(),
+        account            => $Account->sysUser,
+        file               => $Account->sshHome . '/' . OVH::Bastion::AK_FILE(),
         includePivDisabled => 1
     );
     $fnret or return $fnret;
@@ -907,8 +904,8 @@ sub ssh_ingress_keys_piv_apply {
     }
 
     $fnret = OVH::Bastion::put_authorized_keys_to_file(
-        account => $account,
-        file    => $dir . '/' . OVH::Bastion::AK_FILE(),
+        account => $Account->sysUser,
+        file    => $Account->sshHome . '/' . OVH::Bastion::AK_FILE(),
         data    => $keys
     );
     $fnret or return $fnret;
@@ -918,7 +915,7 @@ sub ssh_ingress_keys_piv_apply {
         type     => 'account',
         fields   => [
             [action  => 'modify'],
-            [account => $account],
+            [account => $Account->name],
             [item    => 'piv_ingress_keys_apply'],
             [new     => $action],
             [comment => $message]

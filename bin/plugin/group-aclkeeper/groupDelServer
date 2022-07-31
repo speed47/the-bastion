@@ -79,25 +79,18 @@ if (not $port and not $portAny) {
     osh_exit 'ERR_MISSING_PARAMETER', "No port specified, if any remote port was allowed, add --port-any";
 }
 
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-$fnret or osh_exit($fnret);
+my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+$Group or osh_exit($Group);
 
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
-
-#
-# Now do it
-#
-
-$fnret = OVH::Bastion::is_group_aclkeeper(account => $Self->name, group => $shortGroup, superowner => 1);
-$fnret
-  or osh_exit 'ERR_NOT_GROUP_ACLKEEPER',
-  "Sorry, you must be an aclkeeper of group $shortGroup to be able to delete servers from it";
+if (!$Group->hasAclkeeper($Self, superowner => 1)) {
+  osh_exit('ERR_NOT_GROUP_ACLKEEPER',
+    "Sorry, you must be an aclkeeper of group $Group to be able to delete servers from it");
+}
 
 my @command = qw{ sudo -n -u };
-push @command, ($group, '--', '/usr/bin/env', 'perl', '-T', $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupAddServer');
-push @command, '--group',  $group;
+push @command, $Group->sysUser;
+push @command, '--', '/usr/bin/env', 'perl', '-T', $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupAddServer';
+push @command, '--group',  $Group->sysUser;
 push @command, '--action', 'del';
 push @command, '--ip',     $ip;
 push @command, '--user',   $user if $user;

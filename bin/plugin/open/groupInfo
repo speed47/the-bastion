@@ -112,7 +112,7 @@ if ($Group->hasOwner($Self, superowner => 1)
     }
 
     # policies
-    $fnret = OVH::Bastion::group_config(group => $group, key => 'mfa_required');
+    $fnret = $Group->getConfig("mfa_required");
     if ($fnret && $fnret->value eq 'password') {
         osh_warn
           "MFA Required: when connecting to servers of this group, users will be asked for an additional authentication factor (password)";
@@ -129,14 +129,14 @@ if ($Group->hasOwner($Self, superowner => 1)
         $result->{'mfa_required'} = $fnret->value;
     }
 
-    $fnret = OVH::Bastion::group_config(group => $group, key => 'guest_ttl_limit');
+    $fnret = $Group->getConfig('guest_ttl_limit');
     if ($fnret && defined $fnret->value && $fnret->value =~ /^\d+$/) {
         osh_warn "Guest TTL enforced: guest accesses must have a TTL with a maximum duration of "
           . OVH::Bastion::duration2human(seconds => $fnret->value)->value->{'duration'};
         $result->{'guest_ttl_limit'} = $fnret->value;
     }
 
-    $fnret = OVH::Bastion::group_config(group => $group, %{OVH::Bastion::OPT_GROUP_IDLE_KILL_TIMEOUT()});
+    $fnret = $Group->getConfig("idle_kill_timeout");
     if ($fnret && defined $fnret->value && $fnret->value =~ /^-?\d+$/) {
         if ($fnret->value == 0) {
             osh_warn "Specific idle kill timeout: idle sessions on servers of this group will NOT be cut";
@@ -148,7 +148,7 @@ if ($Group->hasOwner($Self, superowner => 1)
         $result->{'idle_kill_timeout'} = $fnret->value;
     }
 
-    $fnret = OVH::Bastion::group_config(group => $group, => %{OVH::Bastion::OPT_GROUP_IDLE_LOCK_TIMEOUT()});
+    $fnret = $Group->getConfig("idle_lock_timeout");
     if ($fnret && defined $fnret->value && $fnret->value =~ /^-?\d+$/) {
         if ($fnret->value == 0) {
             osh_warn "Specific idle lock timeout: idle sessions on servers of this group will NOT be locked";

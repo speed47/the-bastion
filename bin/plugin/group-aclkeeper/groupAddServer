@@ -94,12 +94,13 @@ if (not $port and not $portAny) {
     osh_exit 'ERR_MISSING_PARAMETER', "No port specified, if you want to add this server with any port, add --port-any";
 }
 
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-$fnret or osh_exit($fnret);
+my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+$Group or osh_exit($Group);
 
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
+if (!$Group->hasAclkeeper($Self, superowner => 1)) {
+  osh_exit('ERR_NOT_GROUP_ACLKEEPER',
+    "Sorry, you must be an aclkeeper of group $Group to be able to add servers to it");
+}
 
 if (defined $ttl) {
     $fnret = OVH::Bastion::is_valid_ttl(ttl => $ttl);
@@ -119,18 +120,9 @@ if ($forcePassword) {
     $forcePassword = $fnret->value->{'hash'};
 }
 
-#
-# Now do it
-#
-
-$fnret = OVH::Bastion::is_group_aclkeeper(account => $Self->name, group => $shortGroup, superowner => 1);
-$fnret
-  or osh_exit 'ERR_NOT_GROUP_ACLKEEPER',
-  "Sorry, you must be an aclkeeper of group $shortGroup to be able to add servers to it";
-
 if (not $force) {
     $fnret = OVH::Bastion::ssh_test_access_way(
-        group         => $group,
+        group         => $Group->sysGroup, # FIXME shoiuld be name
         user          => $user,
         port          => $port,
         ip            => $ip,
@@ -138,7 +130,6 @@ if (not $force) {
         forcePassword => $forcePassword
     );
     if ($fnret->is_ok and $fnret->err ne 'OK') {
-
         # we have something to say, say it
         osh_info $fnret->msg;
     }
@@ -158,8 +149,9 @@ if (!$comment && $host ne $ip) {
 }
 
 my @command = qw{ sudo -n -u };
-push @command, ($group, '--', '/usr/bin/env', 'perl', '-T', $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupAddServer');
-push @command, '--group',          $group;
+push @command, $Group->sysUser;
+push @command, '--', '/usr/bin/env', 'perl', '-T', $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupAddServer';
+push @command, '--group',          $Group->sysUser;
 push @command, '--action',         'add';
 push @command, '--ip',             $ip;
 push @command, '--user',           $user if $user;

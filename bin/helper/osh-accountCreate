@@ -79,9 +79,9 @@ elsif ($fnret->is_err) {
     HEXIT($fnret);
 }
 
-$fnret = OVH::Bastion::is_group_existing(group => $Account->sysUser);
+$fnret = OVH::Bastion::sys_getgr_name(name => $Account->sysUser);
 $fnret->is_err and HEXIT($fnret);
-$fnret->is_ok and HEXIT('KO_ALREADY_EXISTING', msg => "The group $Account already exists");
+$fnret->is_ok and HEXIT('KO_ALREADY_EXISTING', msg => "The group ".$Account->sysUser." already exists");
 #<PARAMS:ACCOUNT
 
 #>PARAMS:UID
@@ -114,7 +114,7 @@ if (defined $maxInactiveDays && $maxInactiveDays < 0) {
 }
 
 #>PARAMS
-$fnret = OVH::Bastion::is_group_existing(group => $Account->ttyGroup);
+$fnret = OVH::Bastion::sys_getgr_name(name => $Account->ttyGroup);
 $fnret and HEXIT('ERR_TTY_GROUP_ALREADY_EXISTS',
     msg => "The TTY group for this account (" . $Account->ttyGroup . ") already exists!");
 

@@ -50,16 +50,17 @@ if (!grep { $p{'action'} eq $_ } qw{ add del }) {
     return R('ERR_INVALID_PARAMETER', msg => "expected 'add' or 'del' as an action");
 }
 #<PARAMS:ACTION
-#>PARAMS:ACCOUNT
 my $Account = OVH::Bastion::Account->newFromName($p{'account'}, check => 1);
 $Account or HEXIT($Account);
-#<PARAMS:ACCOUNT
+
+my $Group = OVH::Bastion::Group->newFromName($p{'group'}, check => 1);
+$Group or HEXIT($Group);
 
 #>CODE
 # access_modify validates all its parameters, don't do it ourselves here for clarity
 $fnret = $Account->accessModify(
     way      => 'groupguest',
-    group    => $p{'group'},
+    Group    => $Group,
     action   => $p{'action'},
     user     => $p{'user'},
     ip       => $p{'ip'},

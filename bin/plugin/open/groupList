@@ -50,29 +50,29 @@ $fnret or osh_exit $fnret;
 my %ownGroups = %{$fnret->value || {}};
 
 my $result_hash = {};
-foreach my $name (@groupList) {
+foreach my $Group (@groupList) {
 
     # if we have excludes, match name against the built regex
-    next if ($excludere && $name =~ $excludere);
+    next if ($excludere && $Group->name =~ $excludere);
 
     # same for includes
-    next if ($includere && $name !~ $includere);
+    next if ($includere && $Group->name !~ $includere);
 
     my @flags;
     foreach my $role (qw{ owner gatekeeper aclkeeper member guest }) {
-        push @flags, $role if $ownGroups{$name}{$role};
+        push @flags, $role if $ownGroups{$Group->name}{$role};
     }
 
     if (@flags or $all) {
         push @flags, 'no-access' if not @flags;
-        my $line = sprintf "%18s", $name;
+        my $line = sprintf "%18s", $Group->name;
         $line .= sprintf " %14s", colored(grep({ $_ eq 'owner' } @flags)      ? 'Owner'      : '-', 'red');
         $line .= sprintf " %19s", colored(grep({ $_ eq 'gatekeeper' } @flags) ? 'GateKeeper' : '-', 'yellow');
         $line .= sprintf " %18s", colored(grep({ $_ eq 'aclkeeper' } @flags)  ? 'ACLKeeper'  : '-', 'magenta');
         $line .= sprintf " %15s", colored(grep({ $_ eq 'member' } @flags)     ? 'Member'     : '-', 'green');
         $line .= sprintf " %14s", colored(grep({ $_ eq 'guest' } @flags)      ? 'Guest'      : '-', 'cyan');
         osh_info $line;
-        $result_hash->{$name} = {flags => \@flags};
+        $result_hash->{$Group->name} = {flags => \@flags};
     }
 }
 if (keys %$result_hash) {

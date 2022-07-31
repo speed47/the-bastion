@@ -353,7 +353,7 @@ sub _sql_log_insert_file {
 
 sub log_access_insert {
     my %params  = @_;
-    my $account = $params{'account'};
+    my $Account = $params{'Account'};
     my $uniqid  = $params{'uniqid'} || $ENV{'UNIQID'};
     my $loghome = $params{'loghome'};                    # only used for proxyhttp
     my $custom  = $params{'custom'};                     # only used for proxyhttp, not pushed to sql
@@ -361,35 +361,14 @@ sub log_access_insert {
 
     # if we get a valid account, we'll try to log to its files, if enabled.
     # if not, or if its invalid, still try to log what we can (hence don't return here)
-    my ($remoteaccount, $sysaccount);
-    if (defined $account) {
-        if ($fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, accountType => "normal"))
-        {
+    # Account can be a normal account or a realm account, in case osh.pl is erroring early and couldn't
+    # rresolve the proper remote account (realm/user format)
 
-            # normal accounts
-            ;
-        }
-        elsif ($fnret =
-            OVH::Bastion::is_bastion_account_valid_and_existing(account => $account, accountType => "realm"))
-        {
-
-            # $account can also be a realm_xyz account, in case osh.pl is erroring early and couldn't resolve the
-            # proper realm-qualified account name (realm/user)
-            ;
-        }
-        else {
-            undef $account;
-        }
-        if ($fnret) {
-            $account       = $fnret->value->{'account'};
-            $sysaccount    = $fnret->value->{'sysaccount'};
-            $remoteaccount = $fnret->value->{'remoteaccount'};
-        }
+    if ($Account) {
+        $loghome ||= $Account->sysUser;
     }
 
-    $loghome ||= $sysaccount;
-
-    $params{'account'} = $account;
+    $params{'Account'} = $Account;
     $params{'loghome'} = $loghome;
 
     if (not defined $uniqid) {
@@ -421,7 +400,7 @@ sub log_access_insert {
             my $sqlfile = sprintf(
                 "/home/%s/%s-log-%04d%02d.sqlite",
                 $loghome,
-                $remoteaccount || $loghome,
+                $Account ? $Account->remoteName : $loghome,
                 $localtime[5] + 1900,
                 $localtime[4] + 1
             );
@@ -439,7 +418,7 @@ sub log_access_insert {
             }
         }
         else {
-            warn_syslog("Attempted to log to account $account sqlite database without a valid loghome ($loghome)");
+            warn_syslog("Attempted to log to account $Account sqlite database without a valid loghome ($loghome)");
         }
     }
 
@@ -457,7 +436,7 @@ sub log_access_insert {
     # 2/3) push to syslog, we'll also say if any sqlinsert failed through globalsql/accountsql
     # even if syslog is disabled, syslogFormatted() will return a oneline $msg that we'll use afterwards
     my @fields = (
-        ['account', $account],
+        ['account', ($Account?$Account->name:'')],
         ['cmdtype', $params{'cmdtype'}],
         ['allowed', ($params{'allowed'} ? 'true' : 'false')],
         ['ip_from',      $params{'ipfrom'}],
@@ -492,7 +471,7 @@ sub log_access_insert {
     my $msg = $fnret ? $fnret->value : $fnret->msg;
 
     # 3/3) push to our own local / global text logs, if enabled, using the $msg returned by syslogFormatted
-    _write_log(account => $account, sysaccount => $loghome, remoteaccount => $remoteaccount, msg => $msg);
+    _write_log(Account => $Account, msg => $msg);
 
     # save this for log_access_update()
     my $cache = {
@@ -638,7 +617,6 @@ EOS
 
         # if this is set, we probably reached max retry in previous loop without succeeding
         if ($DBI::err) {
-
             warn_syslog(
                 "Failed after multiple retries [plugins] err $DBI::err while doing [$doing]: $DBI::errstr ($file)");
             return R('ERR_SQL_EXECUTE', msg => "SQL error [plugins] err $DBI::err while doing [$doing]: $DBI::errstr");
@@ -655,25 +633,16 @@ sub _write_log {
     my @localtime = localtime(time());
     my @date      = ($localtime[5] + 1900, $localtime[4] + 1);
 
-    if (OVH::Bastion::config('enableAccountAccessLog')->value() && $params{'sysaccount'}) {
-        if (
-            open(
-                my $log_acc,
-                ">>",
-                sprintf(
-                    "/home/%s/%s-log-%04d%02d.log",
-                    $params{'sysaccount'}, $params{'remoteaccount'} || $params{'sysaccount'}, @date
-                )
-            )
-          )
-        {
+    my $Account = $params{'Account'};
+    if ($Account && OVH::Bastion::config('enableAccountAccessLog')->value) {
+        my $file = sprintf("%s/%s-log-%04d%02d.log", $Account->home, $Account->remoteName || $Account->sysUser, @date);
+        if (open(my $log_acc, ">>", $file)) {
             print $log_acc localtime() . " " . $params{'msg'} . "\n";
             close($log_acc);
         }
     }
-    if (OVH::Bastion::config('enableGlobalAccessLog')->value()) {
+    if (OVH::Bastion::config('enableGlobalAccessLog')->value) {
         my $file = sprintf("/home/logkeeper/global-log-%04d%02d.log", @date);
-
         # if it doesn't exist yet, create the file ourselves, chgrp it to bastion-users and set the
         # proper rights (0660). if the file already exists, we won't do anything.
         OVH::Bastion::create_file_if_not_exists(file => $file, perms => oct(660), group => "bastion-users");
@@ -700,15 +669,12 @@ sub log_access_update {
 
     # if we get a valid account, we'll try to log to its files, if enabled.
     # if not, or if its invalid, still try to log what we can (hence don't return here)
-    my ($remoteaccount, $sysaccount);
-    if (defined $account) {
-        if ($fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account)) {
-            $account       = $fnret->value->{'account'};
-            $sysaccount    = $fnret->value->{'sysaccount'};
-            $remoteaccount = $fnret->value->{'remoteaccount'};
-        }
-        else {
-            undef $account;
+    my $Account;
+    if ($account) {
+        $Account = OVH::Bastion::Account->newFromName($account);
+        if (!$Account->check()) {
+            warn_syslog("Got an invalid account '$account'");
+            undef $Account;
         }
     }
 
@@ -759,7 +725,7 @@ sub log_access_update {
     # it contains less details that the account databases and doesn't have any field that requires
     # to wait the end of a connection to be filled.
     my $accountsql = 'no';
-    if (OVH::Bastion::config('enableAccountSqlLog')->value()) {
+    if (OVH::Bastion::config('enableAccountSqlLog')->value) {
         if ($insert_id && $db_name) {
             $fnret      = _sql_log_update_file(%params, file => $db_name, id => $insert_id);
             $accountsql = $fnret ? 'ok' : 'error ' . $fnret->msg;
@@ -782,7 +748,7 @@ sub log_access_update {
     my $msg = $fnret ? $fnret->value : $fnret->msg;
 
     # 3/3) push to our own local / global text logs, if enabled, using the $msg returned by syslogFormatted
-    _write_log(account => $account, sysaccount => $sysaccount, remoteaccount => $remoteaccount, msg => $msg);
+    _write_log(Account => $Account, msg => $msg);
 
     return R('OK');
 }
@@ -796,10 +762,10 @@ sub log_access_get {
         return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'account'");
     }
 
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-    $fnret or return $fnret;
-    $account = $fnret->value->{'account'};
-    $params{'account'} = $account;
+    my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+    $Account or return $Account;
+
+    $params{'Account'} = $Account;
 
     my ($timestamp, $timestampusec) = Time::HiRes::gettimeofday();
     $params{'timestamp'}     = $timestamp;
@@ -810,8 +776,8 @@ sub log_access_get {
     # check in account sql file
     if (OVH::Bastion::config('enableAccountSqlLog')->value()) {
         $params{'file'} = sprintf(
-            "/home/%s/%s-log-%04d%02d.sqlite",
-            $params{'account'}, $params{'account'},
+            "%s/%s-log-%04d%02d.sqlite",
+            $Account->home, $Account->remoteName || $Account->sysUser,
             $localtime[5] + 1900,
             $localtime[4] + 1
         );
@@ -831,7 +797,7 @@ sub _sql_log_fetch_from_file {
     my $sqltype     = $params{'sqltype'};
     my $limit       = $params{'limit'};
     my $uniqid      = $params{'uniqid'};
-    my $account     = $params{'account'};
+    my $Account     = $params{'Account'};
     my $cmdtype     = $params{'cmdtype'};
     my $allowed     = $params{'allowed'};
     my $ipfrom      = $params{'ipfrom'};
@@ -852,9 +818,9 @@ sub _sql_log_fetch_from_file {
 
     my @conditions;
     my @execvalues;
-    if ($account) {
+    if ($Account) {
         push @conditions, "account = ?";
-        push @execvalues, $account;
+        push @execvalues, $Account->name;
     }
     if ($cmdtype) {
         push @conditions, "cmdtype = ?";

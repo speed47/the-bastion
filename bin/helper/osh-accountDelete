@@ -252,7 +252,7 @@ if (!$fnret) {
 }
 
 # some systems don't delete the primary group with userdel (suse at least)
-$fnret = OVH::Bastion::is_group_existing(group => $Account->sysUser);
+$fnret = OVH::Bastion::sys_getgr_name(name => $Account->sysUser);
 if ($fnret) {
     osh_info "Deleting account main group '$Account'...";
     $fnret = OVH::Bastion::sys_groupdel(group => $Account->sysUser);

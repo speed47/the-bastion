@@ -20,7 +20,7 @@ testsuite_activeness()
 
     revoke accountCreate
 
-    configchg 's=^\\\\x22accountExternalValidationProgram\\\\x22.+=\\\\x22accountExternalValidationProgram\\\\x22:\\\\x22/opt/bastion/bin/other/doesnotexist.pl\\\\x22,='
+    configset accountExternalValidationProgram "\\\"/opt/bastion/bin/other/doesnotexist.pl\\\""
 
     success test_invalid_config_but_always_active $a3 --osh info
 
@@ -28,7 +28,7 @@ testsuite_activeness()
     run test_invalid_config $a1 --osh info
     retvalshouldbe 101
 
-    configchg 's=^\\\\x22accountExternalValidationProgram\\\\x22.+=\\\\x22accountExternalValidationProgram\\\\x22:\\\\x22/opt/bastion/bin/other/check-active-account-fortestsonly.pl\\\\x22,='
+    configset accountExternalValidationProgram "\\\"/opt/bastion/bin/other/check-active-account-fortestsonly.pl\\\""
 
     run test_account1 $a1 --osh info
     retvalshouldbe 101
@@ -38,7 +38,7 @@ testsuite_activeness()
     success test_account3 $a3 --osh info
 
     # for remaining tests, disable the feature
-    configchg 's=^\\\\x22accountExternalValidationProgram\\\\x22.+=\\\\x22accountExternalValidationProgram\\\\x22:\\\\x22\\\\x22,='
+    configset accountExternalValidationProgram "\\\"\\\""
 
     grant accountDelete
 

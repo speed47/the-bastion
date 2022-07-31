@@ -74,7 +74,6 @@ if (defined $ttl) {
     $ttl = $fnret->value->{'seconds'};
 }
 
-osh_warn("FIXME MIGRA user$user userAny$userAny");
 my $realUser = $user;
 $realUser = '!scpupload'   if $scpUp;
 $realUser = '!scpdownload' if $scpDown;

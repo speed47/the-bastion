@@ -17,25 +17,22 @@ sub preconditions {
     );
     $fnret or return $fnret;
 
-    my ($group, $shortGroup, $passhome, $base, $Account);
+    my ($Group, $passhome, $base, $Account);
 
     if ($p{'context'} eq 'group') {
         if (not $p{'group'}) {
             return R('ERR_MISSING_PARAMETER', msg => "Missing argument 'group'");
         }
-        $fnret = OVH::Bastion::is_valid_group_and_existing(group => $p{'group'}, groupType => 'key');
-        $fnret or return $fnret;
-        $group      = $fnret->value->{'group'};
-        $shortGroup = $fnret->value->{'shortGroup'};
-        $passhome   = "/home/$group/pass";
-        $base       = "$passhome/$shortGroup";
+        $Group = OVH::Bastion::Group->newFromName($p{'group'}, check => 1);
+        $passhome   = $Group->passwordHome;
+        $base       = $Group->passwordFile;
     }
     elsif ($p{'context'} eq 'account') {
         if (!$p{'Account'}) {
             if (!$p{'account'}) {
                 return R('ERR_MISSING_PARAMETER', msg => "Missing argument 'account'");
             }
-            $Account = OVH::Bastion::Account->newFromName($p{'account'});
+            $Account = OVH::Bastion::Account->newFromName($p{'account'}, check => 1);
             $Account or return $Account;
         }
         else {
@@ -45,8 +42,8 @@ sub preconditions {
         $fnret = $Account->check();
         $fnret or return $fnret;
 
-        $passhome = $Account->passHome;
-        $base     = "$passhome/" . $Account->sysUser;
+        $passhome = $Account->passwordHome;
+        $base     = $Account->passwordFile;
     }
     else {
         return R('ERR_INVALID_PARAMETER', msg => "Expected a context 'group' or 'account'");
@@ -61,12 +58,12 @@ sub preconditions {
     return R('ERR_INVALID_PARAMETER', msg => "Specified size must be <= 127")          if $p{'size'} > 128;
 
     if ($p{'context'} eq 'account' && $Self ne $Account) {
-        $fnret = OVH::Bastion::is_user_in_group(user => $Self->sysUser, group => "osh-accountGeneratePassword");
+        $fnret = $Self->hasRole("accountGeneratePassword");
         $fnret or return R('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $Self");
     }
     elsif ($p{'context'} eq 'group') {
-        $fnret = OVH::Bastion::is_group_owner(account => $Self->sysUser, group => $shortGroup, superowner => 1);
-        $fnret or return R('ERR_NOT_ALLOWED', msg => "You're not a group owner of $shortGroup, dear $Self");
+        $fnret = $Group->hasOwner($Self, superowner => 1);
+        $fnret or return R('ERR_NOT_ALLOWED', msg => "You're not a group owner of $Group, dear $Self");
     }
 
     # return untainted values
@@ -75,8 +72,7 @@ sub preconditions {
         value => {
             Self       => $Self,
             Account    => $Account,
-            shortGroup => $shortGroup,
-            group      => $group,
+            Group => $Group,
             size       => $p{'size'},
             context    => $p{'context'},
             base       => $base,
@@ -91,8 +87,8 @@ sub act {
     $fnret or return $fnret;
 
     my %values = %{$fnret->value()};
-    my ($Self, $Account, $shortGroup, $group, $size, $context, $passhome, $base) =
-      @values{qw{  Self  Account  shortGroup  group  size  context  passhome  base }};
+    my ($Self, $Account, $Group, $size, $context, $passhome, $base) =
+      @values{qw{  Self  Account  Group  size  context  passhome  base }};
 
     my $pass;
     my $antiloop = 1000;
@@ -191,8 +187,8 @@ sub act {
         'OK',
         value => {
             context => $context,
-            group   => $shortGroup,
-            account => ($Account ? $Account->name : undef),
+            Group   => $Group,
+            Account => $Account,
             hashes  => $hashes
         }
     );

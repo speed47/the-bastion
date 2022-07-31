@@ -483,7 +483,7 @@ testsuite_selfaccesses()
     json .command accountUnexpire .error_code OK_NO_CHANGE
 
     # artificially expire account1
-    configchg 's=^\\\\x22accountMaxInactiveDays\\\\x22.+=\\\\x22accountMaxInactiveDays\\\\x22:2,='
+    configset accountMaxInactiveDays 2
     success manuallyExpireAccount1 $r0 "touch -t 201501010101 /home/$account1/lastlog"
 
     run expired $a1 --osh info

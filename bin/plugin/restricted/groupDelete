@@ -1,6 +1,5 @@
 #! /usr/bin/env perl
 # vim: set filetype=perl ts=4 sw=4 sts=4 et:
-# TODO move this from restricted/ to group-owner/
 
 use common::sense;
 
@@ -44,12 +43,8 @@ if (!$group) {
     osh_exit 'ERR_MISSING_PARAMETER', "Missing 'group' parameter";
 }
 
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-$fnret or osh_exit($fnret);
-
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
+my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+$Group or osh_exit($Group);
 
 if (!$noConfirm) {
     osh_info <<'EOS';
@@ -65,13 +60,13 @@ EOS
     ## use critic
     chomp $sentence;
 
-    if ($sentence ne $shortGroup) {
+    if ($sentence ne $Group->name) {
         osh_exit 'ERR_OPERATOR_IS_DRUNK', "You're drunk, apparently, aborted.";
     }
 }
 
 my @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupDelete';
-push @command, "--group", $group;
+push @command, "--group", $Group->sysGroup;
 
 osh_exit OVH::Bastion::helper(cmd => \@command);

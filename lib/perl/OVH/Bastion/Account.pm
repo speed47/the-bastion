@@ -1,4 +1,5 @@
 package OVH::Bastion::Account;
+# vim: set filetype=perl ts=4 sw=4 sts=4 et:
 use common::sense;
 
 use Cwd; # getcwd
@@ -35,7 +36,7 @@ sub _memoizify {
     return memoize(
         $funcname,
         SCALAR_CACHE => ['HASH' => \%CACHE],
-        LIST_CACHE => 'FAULT',
+        LIST_CACHE => ['HASH' => \%CACHE],
         NORMALIZER => sub { unshift @_, $funcname; goto \&_normalize; }
     );
 }
@@ -102,8 +103,9 @@ sub newFromName {
         $fnret = _new_from_name(name => $p{'name'}, type => $p{'type'} || 'regular');
         $fnret or return $fnret;
         # we have either:
-        # R('OK', value => {sysaccount => "realm_$1", realm => $1,    remoteaccount => $2,    account => "$1/$2"});
-        # R('OK', value => {sysaccount => $1,         realm => undef, remoteaccount => undef, account => $1});
+        # {type => "local",  sysaccount => $1,         realm => undef, remoteaccount => undef, account => $1}
+        # {type => "realm",  sysaccount => "realm_$1", realm => $1,    remoteaccount => undef, account => $1}
+        # {type => "remote", sysaccount => "realm_$1", realm => $1,    remoteaccount => $2,    account => "$1/$2"}
 
         my $sysaccount = $fnret->value->{'sysaccount'};
         my $allowedPrefix = ($fnret->value->{'remoteaccount'} ? 'allowed_'.$fnret->value->{'remoteaccount'} : 'allowed');
@@ -123,7 +125,9 @@ sub newFromName {
             allowkeeperHome      => "/home/allowkeeper/$sysaccount",
             allowedIpFile        => "/home/allowkeeper/$sysaccount/$allowedPrefix.ip",
             allowedPrivateFile   => "/home/allowkeeper/$sysaccount/$allowedPrefix.private",
-            passHome             => "/home/$sysaccount/pass",
+            allowedGuestFile     => "/home/allowkeeper/$sysaccount/$allowedPrefix.partial.#GROUP#",
+            allowedMemberFile    => "/home/allowkeeper/$sysaccount/$allowedPrefix.ip.#GROUP#",
+            passwordHome             => "/home/$sysaccount/pass",
             passwordFile         => "/home/$sysaccount/pass/$sysaccount",
 
             sshHome              => "/home/$sysaccount/.ssh",
@@ -158,7 +162,7 @@ BEGIN {
     # simple getters, they have no corresponding setter, as Account objects are immutable
     foreach my $attr (qw{
             name sysUser remoteName realm type home allowkeeperHome
-            passHome sshHome ttyrecHome passwordFile
+            passwordHome sshHome ttyrecHome passwordFile
             sshConfigFile authorizedKeysFile isFake ttyGroup
         }) {
         *$attr = sub {
@@ -196,6 +200,49 @@ BEGIN {
     }
 
     use strict "refs";
+}
+
+# more complicated getter
+_memoizify('allowedGuestFile');
+sub allowedGuestFile {
+    my ($this, $Group, %p) = @_;
+    $p{'Group'} = $Group;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ Group }],
+    );
+    if (!$fnret) {
+        warn_syslog("Called allowedGuestFile with bad params");
+        return '/dev/invalid/file'; 
+    }
+
+    # we don't call check() or isExisting() on the group, as it doesn't actually
+    # need to exist, we'll still return the valid theoretical path
+
+    my $path = $this->{'allowedGuestFile'};
+    my $groupName = $Group->name;
+    $path =~ s{#GROUP#}{$groupName}g;
+    return $path;
+}
+
+_memoizify('allowedMemberFile');
+sub allowedMemberFile {
+    my ($this, $Group, %p) = @_;
+    $p{'Group'} = $Group;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ Group }],
+    );
+    if (!$fnret) {
+        warn_syslog("Called allowedMemberFile with bad params");
+        return '/dev/invalid/file'; 
+    }
+
+    # we don't call check() or isExisting() on the group, as it doesn't actually
+    # need to exist, we'll still return the valid theoretical path
+
+    my $path = $this->{'allowedMemberFile'};
+    my $groupName = $Group->name;
+    $path =~ s{#GROUP#}{$groupName}g;
+    return $path;
 }
 
 sub equal {
@@ -804,12 +851,13 @@ sub _new_from_name {
             }
         }
 
+        my ($realmName) = $name =~ /^realm_(.+)/;
         return R('OK', value => {
             sysaccount => $name,
-            realm => undef,
+            realm => $realmName, # undef if name !~ /^realm_/
             remoteaccount => undef,
             account => $name,
-            type => ($name =~ /^realm_/ ? 'realm' : 'local'),
+            type => ($realmName ? 'realm' : 'local'),
         });
     }
     else {
@@ -818,7 +866,22 @@ sub _new_from_name {
     return R('ERR_IMPOSSIBLE_CASE');
 }
 
-sub _has_role {
+_memoizify('hasRole');
+sub hasRole {
+    my ($this, $role) = @_;
+
+    my $fnret = $this->isExisting();
+    $fnret or return $fnret;
+
+    if (OVH::Bastion::is_user_in_group(group => "osh-$role", user => $this->sysUser)) {
+            return R('OK', msg => "Account '$this' has the bastion role '$role'");
+    }
+
+    return R('KO_ACCESS_DENIED', msg => "Account $this doesn't have the role '$role'");
+}
+
+# used by isAdmin and isSuperOwner
+sub _has_special_role {
     my ($this, $role, $configList, $sysGroup) = @_;
 
     my $fnret = $this->isExisting();
@@ -826,18 +889,18 @@ sub _has_role {
 
     if (OVH::Bastion::is_user_in_group(group => $sysGroup, user => $this->sysUser)) {
         if (!$configList || any { $this->name eq $_ } @{ OVH::Bastion::config($configList)->value || [] }) {
-            return R('OK', msg => "Account ".$this->name." is a bastion $role");
+            return R('OK', msg => "Account '$this' has the bastion role '$role'");
         }
     }
-    return R('KO_ACCESS_DENIED', msg => "Account ".$this->name." is not a bastion $role");
+    return R('KO_ACCESS_DENIED', msg => "Account $this doesn't have the role '$role'");
 }
 
+
 _memoizify('isAdmin');
-sub isAdmin      { my $this = shift; return $this->_has_role("administrator", "adminAccounts", "osh-admin"); }
+sub isAdmin      { my $this = shift; return $this->_has_special_role("administrator", "adminAccounts", "osh-admin"); }
 _memoizify('isSuperOwner');
-sub isSuperOwner { my $this = shift; return $this->_has_role("superowner", "superOwnerAccounts", "osh-superowner") || $this->isAdmin; }
-_memoizify('isAuditor');
-sub isAuditor    { my $this = shift; return $this->_has_role("auditor", undef, "osh-auditor"); }
+sub isSuperOwner { my $this = shift; return $this->_has_special_role("superowner", "superOwnerAccounts", "osh-superowner") || $this->isAdmin; }
+sub isAuditor    { my $this = shift; return $this->hasRole("auditor"); }
 
 # return a hash with keys being the bastion group names and as values,
 # a hash of relations to this account, i.e. member, guest, aclkeeper,
@@ -873,7 +936,7 @@ sub getGroups {
             if (!$type) {
                 # member or guest?
                 my $prefix = $this->remoteName ? "allowed_".$this->remoteName : "allowed";
-                if (-l sprintf("%s/%s.ip.%s", $this->allowkeeperHome, $prefix, $groupname)) {
+                if (-l sprintf("%s/%s.ip.%s", $this->allowkeeperHome, $prefix, $groupname)) { # FIXME MIGRA 
                     $type = 'member';
                 }
                 else {
@@ -1187,7 +1250,7 @@ sub generateEgressKey {
     my ($this, %p) = @_;
     my $fnret = OVH::Bastion::check_args(\%p,
         mandatory => [qw{ algo size }],
-        optional => [qw{ passphrase }],
+        optionalFalseOk => [qw{ passphrase }],
     );
     $fnret or return $fnret;
 
@@ -1206,11 +1269,11 @@ sub generateEgressKey {
     return $Key;
 }
 
-# only for realm support accounts, we return a list of account NAMES (not objects)
-# that will all be of the "joe1", "joe2", etc. format. i.e. the actual full name
-# of the account is realmName/joeX
-_memoizify('getRemoteAccountsNames');
-sub getRemoteAccountsNames {
+# only for realm support accounts, we return a list of Accounts (objects)
+# that will all have their name in the format realmName/accountName,
+# and of type==remote
+_memoizify('getRemoteAccounts');
+sub getRemoteAccounts {
     my ($this,%p)     = @_;
     my $fnret = OVH::Bastion::check_args(\%p);
     $fnret or return $fnret;
@@ -1231,7 +1294,21 @@ sub getRemoteAccountsNames {
         }
         closedir($dh);
     }
-    return R('OK', value => [sort keys %accounts]);
+
+    my @list;
+    foreach my $account (keys %accounts) {
+        my $RemoteAccount = OVH::Bastion::Account->newFromName(
+            sprintf("%s/%s", $this->realm, $account), type => "remote"
+        );
+        if (!$RemoteAccount) {
+            OVH::Bastion::warn_syslog("Got an invalid remote account '$account' ($RemoteAccount)");
+        }
+        else {
+            push @list, $RemoteAccount;
+        }
+    }
+
+    return R('OK', value => \@list);
 }
 
 sub getAllAcls {

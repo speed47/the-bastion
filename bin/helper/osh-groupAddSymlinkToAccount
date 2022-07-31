@@ -53,7 +53,7 @@ if ($Self->isLocalRoot) {
     osh_debug "Real root, skipping checks of permissions";
 }
 else {
-    $fnret = $Group->hasGatekeeper($Self);
+    $fnret = $Group->hasGatekeeper($Self, superowner => 1);
     if (!$fnret) {
         warn_syslog("$0: account $Self is not a $Group gatekeeper, refused to continue");
         HEXIT('ERR_NOT_ALLOWED', msg => "Sorry, you're not a gatekeeper of group $Group");

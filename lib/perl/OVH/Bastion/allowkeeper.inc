@@ -8,22 +8,6 @@ use Time::Piece;    # $t->strftime
 use Carp;
 use List::Util qw{ any none };
 
-sub is_bastion_account_valid_and_existing {    # FIXME kill me after MIGRA
-    my %params = @_;
-    my $A      = OVH::Bastion::Account->newFromName($params{'account'}, check => 1);
-    $A or return $A;
-    return R(
-        'OK',
-        value => {
-            account       => $A->name,
-            sysaccount    => $A->sysUser,
-            remoteaccount => $A->remoteName,
-            realm         => $A->realm,
-            home          => $A->home
-        }
-    );
-}
-
 # Check if a system user belongs to a specific system group
 sub is_user_in_group {
     my %p     = @_;
@@ -39,45 +23,6 @@ sub is_user_in_group {
     else {
         return R('KO_NOT_IN_GROUP', msg => "Account " . $p{'user'} . " doesn't belong to the group " . $p{'group'});
     }
-}
-
-# does this system group exist? if it happens to be mapped to a bastion group,
-# also return the corresponding "shortGroup" (with the "key" prefix removed)
-sub is_group_existing {
-    my %p     = @_;
-    my $fnret = OVH::Bastion::check_args(
-        \%p,
-        mandatory => [qw{ group }],
-        optional  => [qw{ groupType user_friendly_error }],
-    );
-    $fnret or return $fnret;
-
-    my $group = $p{'group'};
-
-    $fnret = OVH::Bastion::sys_getgr_name(name => $group);
-
-    if ($fnret) {
-        my (undef, $shortGroup) = $group =~ m{^(key)?(.+)};
-        return R(
-            'OK',
-            value => {
-                group      => $group,
-                shortGroup => $shortGroup,
-                gid        => $fnret->value->{'gid'},
-                keyhome    => "/home/keykeeper/$group",
-                members    => $fnret->value->{'members'},
-            }
-        );
-    }
-
-    # build a user-compatible error message if asked to, as it can make its way through osh_exit()
-    if ($p{'user_friendly_error'}) {    # FIXME remove this ugly thing
-        $group =~ s/^key//;
-        return R('KO_GROUP_NOT_FOUND',
-            msg => "The bastion group '$group' doesn't exist.\n"
-              . "You may use groupList --all to see all existing groups.");
-    }
-    return R('KO_GROUP_NOT_FOUND', msg => "Group '$group' doesn't exist");
 }
 
 # validate uid/gid
@@ -181,9 +126,9 @@ sub access_modify {
         # user: if undef, means a user-wildcard access
         # port: if undef, means a port-wildcard access
         optionalFalseOk => [qw{ user port ttl comment forceKey forcePassword }],
-        # group: only for way=group or way=groupguest
+        # Group: only for way=group or way=groupguest
         # Account: only for way=personal
-        optional => [qw{ Account group }],
+        optional => [qw{ Account Group }],
     );
     $fnret or return $fnret;
 
@@ -197,7 +142,7 @@ sub access_modify {
     my $comment = $p{'comment'};
 
     my $way     = $p{'way'};        # group, groupguest, personal
-    my $group   = $p{'group'};      # only for way=group or way=groupguest
+    my $Group   = $p{'Group'};      # only for way=group or way=groupguest
     my $Account = $p{'Account'};    # only for way=personal
 
     my $forceKey      = $p{'forceKey'};
@@ -209,15 +154,15 @@ sub access_modify {
 
     # check way
     if ($way eq 'personal') {
-        return R('ERR_INVALID_PARAMETER', msg => "Group parameter specified with way=personal")   if defined $group;
+        return R('ERR_INVALID_PARAMETER', msg => "Group parameter specified with way=personal")   if $Group;
         return R('ERR_MISSING_PARAMETER', msg => "Account parameter mandatory with way=personal") if !$Account;
     }
     elsif ($way eq 'group') {
-        return R('ERR_MISSING_PARAMETER', msg => "Group parameter mandatory with way=group")   if !defined $group;
+        return R('ERR_MISSING_PARAMETER', msg => "Group parameter mandatory with way=group")   if !$Group;
         return R('ERR_INVALID_PARAMETER', msg => "Account parameter specified with way=group") if $Account;
     }
     elsif ($way eq 'groupguest') {
-        if (!$Account || !defined $group) {
+        if (!$Account || !$Group) {
             return R('ERR_MISSING_PARAMETER', msg => "Account or group parameter missing with way=groupguest");
         }
     }
@@ -250,22 +195,19 @@ sub access_modify {
 
     # check account
     if ($Account) {
-        # accountType==normal : account must NOT be a realm_* account (but can be a realm/jdoe account)
         $fnret = $Account->check();
         $fnret or return $fnret;
 
+        # account must NOT be a realm_* account (but can be a realm/jdoe account)
         if (none { $Account->type eq $_ } qw{ local remote }) {
             return R('ERR_INVALID_ACCOUNT', msg => "The account '$Account' is neither a local or remote account");
         }
     }
 
     # check group
-    my $shortGroup;
-    if (defined $group) {
-        $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => 'key');
+    if ($Group) {
+        $fnret = $Group->check();
         $fnret or return $fnret;
-        $group      = $fnret->value->{'group'};         # untainted
-        $shortGroup = $fnret->value->{'shortGroup'};    # untainted
     }
 
     # check key fingerprint
@@ -314,36 +256,18 @@ sub access_modify {
 
     if ($way eq 'personal') {
         if ($RequesterAccount eq $Account) {
-            push @one_should_succeed,
-              OVH::Bastion::is_user_in_group(
-                user  => $RequesterAccount->sysUser,
-                group => 'osh-self' . ucfirst($action) . 'PersonalAccess',
-              );
+            push @one_should_succeed, $RequesterAccount->hasRole('self'.ucfirst($action).'PersonalAccess');
         }
 
         # this is not a else here: somebody who has the account* right doesn't need the self* right
-        push @one_should_succeed,
-          OVH::Bastion::is_user_in_group(
-            user  => $RequesterAccount->sysUser,
-            group => 'osh-account' . ucfirst($action) . 'PersonalAccess',
-          );
+        push @one_should_succeed, $RequesterAccount->hasRole('account'.ucfirst($action).'PersonalAccess');
     }
     elsif ($way eq 'group') {
-        $expected_running_as = $group;
-        push @one_should_succeed,
-          OVH::Bastion::is_group_aclkeeper(
-            account    => $RequesterAccount->sysUser,
-            group      => $shortGroup,
-            superowner => 1
-          );
+        $expected_running_as = $Group->sysUser;
+        push @one_should_succeed, $Group->hasAclkeeper($RequesterAccount, superowner => 1);
     }
     elsif ($way eq 'groupguest') {
-        push @one_should_succeed,
-          OVH::Bastion::is_group_gatekeeper(
-            account    => $RequesterAccount->sysUser,
-            group      => $shortGroup,
-            superowner => 1
-          );
+        push @one_should_succeed, $Group->hasGatekeeper($RequesterAccount, superowner => 1);
     }
 
     if ($running_as ne $expected_running_as) {
@@ -354,21 +278,21 @@ sub access_modify {
     if (grep({ $_ } @one_should_succeed) == 0 && !$RequesterAccount->isLocalRoot) {
         warn_syslog("Security violation: requesting user '$RequesterAccount' doesn't have the right to do that "
               . "(way=$way, group="
-              . ($shortGroup ? '<u>' : $shortGroup)
+              . ($Group ? '<u>' : $Group)
               . ")");
         return R('ERR_SECURITY_VIOLATION', msg => "You're not allowed to do that");
     }
 
     # now, check if the access we're being asked to change is already in place or not
-    osh_debug("for action $action of $user\@$ip:$port of way $way with account=$Account and group=$group "
+    osh_debug("for action $action of $user\@$ip:$port of way $way with account=$Account and group=$Group "
           . "requested by $RequesterAccount, checking if already granted");
     $fnret = OVH::Bastion::is_access_way_granted(
         user    => $user,
         ip      => $ip,
         port    => $port,
         way     => $way,
-        group   => $shortGroup,
-        account => $Account ? $Account->name : undef,
+        group   => ($Group ? $Group->name : undef),
+        account => ($Account ? $Account->name : undef),
         exactMatch => 1,    # we're checking if the exact right we're asked to modify exists or not
     );
     osh_debug("... result is $fnret");
@@ -493,8 +417,8 @@ sub access_modify {
             fields   => [
                 ['action',         $p{'action'}],
                 ['type',           $p{'way'}],
-                ['group',          $shortGroup],
-                ['account',        $p{'account'}],
+                ['group',          $p{'Group'}?$p{'Group'}->name:''],
+                ['account',        $p{'Account'}?$p{'Account'}->name:''],
                 ['user',           $p{'user'}],
                 ['ip',             $p{'ip'}],
                 ['port',           $p{'port'}],
@@ -511,16 +435,14 @@ sub access_modify {
     # then call the sub we just defined
     delete $p{'file'};
     my $ret;
-    my $prefix = ($Account && $Account->remoteName) ? "allowed_" . $Account->remoteName : "allowed";
     if ($way eq 'personal') {
         $ret = $_access_modify_file->(%p, file => $Account->allowedPrivateFile);
     }
     elsif ($way eq 'group') {
-        $ret = $_access_modify_file->(%p, file => "/home/$group/allowed.ip");
+        $ret = $_access_modify_file->(%p, file => $Group->allowedIpFile);
     }
     elsif ($way eq 'groupguest') {
-        $ret =
-          $_access_modify_file->(%p, file => "/home/allowkeeper/" . $Account->sysUser . "/$prefix.partial.$shortGroup");
+        $ret = $_access_modify_file->(%p, file => $Account->guestAllowedFile($Group));
     }
     osh_debug("_access_modify_file() said $ret");
     return $ret if defined $ret;
@@ -528,115 +450,28 @@ sub access_modify {
     return R('ERR_INTERNAL');    # unreachable
 }
 
-# Check that a group is valid or not (syntax)
-sub is_valid_group {
-    my %p     = @_;
-    my $fnret = OVH::Bastion::check_args(
-        \%p,
-        mandatory => [qw{ group }],
-        optional  => [qw{ groupType }],
-    );
-    $fnret or return $fnret;
-
-    my $group     = $p{'group'};
-    my $groupType = $p{'groupType'};
-
-    # possible groupTypes:
-    # osh: osh-accountList
-    # tty: login8-tty
-    # key: keymygroup
-    # gatekeeper: keymygroup-gatekeeper
-    # aclkeeper: keymygroup-aclkeeper
-    # owner: keymygroup-owner
-    # regular: no check appart from the length and forbidden prefixes/suffixes
-
-    # autodetect if my caller prefixed the group name with 'key' or not, and adjust accordingly.
-    # we'll return normalized group and shortGroup values to our caller
-    if ($group !~ /^key/ && defined $groupType && grep { $groupType eq $_ } qw{ key gatekeeper aclkeeper owner }) {
-        $group = "key$group";
-    }
-
-    if ($group =~ m/keeper$/i and not grep { $groupType eq $_ } qw{ gatekeeper aclkeeper }) {
-        return R('KO_FORBIDDEN_SUFFIX', msg => 'Forbidden suffix in group name');
-    }
-    elsif ($group =~ m/owner$/i and $groupType ne 'owner') {
-        return R('KO_FORBIDDEN_SUFFIX', msg => 'Forbidden suffix in group name');
-    }
-    elsif ($group =~ m/-tty$/i and $groupType ne 'tty') {
-        return R('KO_FORBIDDEN_SUFFIX', msg => 'Forbidden suffix in group name');
-    }
-    elsif ($group =~ m/^key/i and not grep { $groupType eq $_ } qw{ key gatekeeper owner }) {
-        return R('KO_FORBIDDEN_PREFIX', msg => 'Forbidden prefix in group name');
-    }
-    elsif ($group =~ m/^[-.]/) {
-        return R('KO_FORBIDDEN_PREFIX', msg => "Group name can't start with a '-' nor a '.'");
-    }
-    elsif ($group =~ /^(key)?(private|root|user|self|legacy|osh)(-(gatekeeper|aclkeeper|owner))?$/) {
-        return R('KO_FORBIDDEN_NAME', msg => 'Forbidden group name');
-    }
-    elsif ($group =~ m/^([a-zA-Z0-9._-]+)$/) {
-        $group = $1;    # untainted
-        if ($groupType eq 'key' and $group !~ m/^key/) {
-            return R('KO_MISSING_PREFIX', msg => "The group $group should have a prefix (group type $groupType)");
-        }
-        elsif ($groupType eq 'gatekeeper' and $group !~ m/^key.+-gatekeeper$/) {
-            return R('KO_MISSING_PREFIX', msg => "The group $group should have a prefix (group type $groupType)");
-        }
-        elsif ($groupType eq 'owner' and $group !~ m/^key.+-owner$/) {
-            return R('KO_MISSING_PREFIX', msg => "The group $group should have a prefix (group type $groupType)");
-        }
-        elsif ($groupType and $groupType eq 'tty' and $group !~ m/-tty$/) {
-            return R('KO_MISSING_SUFFIX', msg => "The group $group should have a suffix (group type $groupType)");
-        }
-        my $shortGroup = $group;
-        $shortGroup =~ s/^key|^osh-|-(gatekeeper|aclkeeper|owner|tty)$//g;
-
-        if (length($group) > 32) {
-
-            # 32 max for the whole group (system limit)
-            return R('KO_NAME_TOO_LONG', msg => 'Group name is too long (system limit)');
-        }
-
-        # 18 max for the short group name, because 32 - length(key) - length(-gatekeeper) == 18
-        if ((grep { $groupType eq $_ } qw{ key gatekeeper aclkeeper owner }) && (length($shortGroup) > 18)) {
-            return R('KO_NAME_TOO_LONG', msg => "Group name is too long (limit is 18 chars)");
-        }
-
-        return R('OK', value => {group => $group, shortGroup => $shortGroup});
-    }
-    return R('KO_FORBIDDEN_NAME', msg => 'Group name contains invalid characters');
-}
-
-sub is_valid_group_and_existing {
-    my %params = @_;
-
-    my $fnret = OVH::Bastion::is_valid_group(%params);
-    $fnret or return $fnret;
-    $params{'group'} = $fnret->value->{'group'};
-    return OVH::Bastion::is_group_existing(%params, user_friendly_error => 1);
-}
-
 # return the list of the bastion groups (i.e. not the system group list)
 sub get_group_list {
     my %p     = @_;
-    my $fnret = OVH::Bastion::check_args(\%p);
+    my $fnret = OVH::Bastion::check_args(
+        \%p,
+        optionalFalseOk => [qw{ fast }],
+    );
     $fnret or return $fnret;
 
-    # we loop through all the system groups and only retain those starting
-    # with "key", and not finishing in -owner, -gatekeeper or -aclkeeper.
-    # we also exclude special builtin groups (keykeeper and keyreader)
     $fnret = OVH::Bastion::sys_getgr_all();
     $fnret or return $fnret;
 
     my %groups;
     foreach my $name (keys %{$fnret->value}) {
-        if (   $name =~ /^key/
-            && $name !~ /-(?:owner|gatekeeper|aclkeeper)$/
-            && !grep { $name eq $_ } qw{ keykeeper keyreader })
-        {
-            my $entry = $fnret->value->{$name};
-            $name =~ s/^key//;
-            $groups{$name} = {gid => $entry->{'gid'}, members => $entry->{'members'}} if ($name ne '');
+        my $Group = OVH::Bastion::Group->newFromName($name);
+        next if !$Group;
+
+        if ($p{'fast'}) {
+            $groups{$Group->name} = $Group;
+        }
+        else {
+            $groups{$Group->name} = $Group if $Group->isExisting();
         }
     }
     return R('OK', value => \%groups);
@@ -704,135 +539,6 @@ sub get_realm_list {
     }
 
     return R('OK', value => \%users);
-}
-
-# used by funcs below
-sub _has_group_role {
-    my %p     = @_;
-    my $fnret = OVH::Bastion::check_args(
-        \%p,
-        mandatory       => [qw{ account group role }],
-        optionalFalseOk => [qw{ superowner }],
-    );
-    $fnret or return $fnret;
-
-    my $account    = $p{'account'};
-    my $shortGroup = $p{'group'};
-    my $role       = $p{'role'};          # regular or gatekeeper or owner
-    my $superowner = $p{'superowner'};    # allow superowner (will always return yes if so)
-
-    my $group = "key$shortGroup";
-
-    # "regular" means "member or guest", i.e. user is in group key$GROUPNAME
-    if ($role ne 'regular') {
-        $group .= "-$role";
-    }
-
-    # for the realm case, we need to test sysaccount and not just account
-    my $Account = OVH::Bastion::Account->newFromName($account);
-    $Account or return $Account;
-
-    $fnret = $Account->isExisting();
-    $fnret or return $fnret;
-
-    my $sysaccount = $Account->sysUser;
-
-    $fnret = OVH::Bastion::is_user_in_group(user => $sysaccount, group => $group);
-    osh_debug("is <$sysaccount> in <$group> ? => " . ($fnret ? 'yes' : 'no'));
-    if ($fnret) {
-        return R(
-            $fnret->err,
-            msg   => $fnret->msg,
-            value => {account => $account, sysaccount => $sysaccount, superowner => 0}
-        );
-    }
-
-    # if superowner allowed, try it
-    if ($superowner) {
-        if ($Account->isSuperOwner) {
-            osh_debug("is <$sysaccount> in <$group> ? => no but superowner so YES!");
-            return R('OK', value => {account => $account, sysaccount => $sysaccount, superowner => 1});
-        }
-    }
-
-    # not admin or no superowner allowed... return is_user_in_group status but fixup the value if true
-    if ($fnret) {
-        return R(
-            $fnret->err,
-            msg   => $fnret->msg,
-            value => {account => $account, sysaccount => $sysaccount, superowner => 0}
-        );
-    }
-    return $fnret;
-}
-
-sub is_group_aclkeeper {
-    my %params = @_;
-    $params{'role'} = 'aclkeeper';
-    return _has_group_role(%params);
-}
-
-sub is_group_gatekeeper {
-    my %params = @_;
-    $params{'role'} = 'gatekeeper';
-    return _has_group_role(%params);
-}
-
-sub is_group_owner {
-    my %params = @_;
-    $params{'role'} = 'owner';
-    return _has_group_role(%params);
-}
-
-sub _is_group_member_or_guest {
-    my %p     = @_;
-    my $fnret = OVH::Bastion::check_args(\%p, mandatory => [qw{ group account want }],);
-
-    my $shortGroup = $p{'group'};
-    my $want       = $p{'want'};    # guest or member
-
-    $fnret = _has_group_role(group => $p{'group'}, account => $p{'account'}, role => "regular");
-    $fnret or return $fnret;
-
-    my $account = $fnret->value()->{'account'};
-    $fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $account);
-    $fnret or return $fnret;
-
-    $account = $fnret->value->{'account'};
-    my $remoteaccount = $fnret->value->{'remoteaccount'};
-    my $sysaccount    = $fnret->value->{'sysaccount'};
-
-    my $group = "key$shortGroup";
-    $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-    $fnret or return $fnret;
-    $group      = $fnret->value()->{'group'};
-    $shortGroup = $fnret->value()->{'shortGroup'};    # untainted
-
-    my $weare = 'guest';
-
-    # to be a member (old name: "full member"); one also need to have the symlink
-    my $prefix = $remoteaccount ? "allowed_$remoteaccount" : "allowed";
-    if (-l "/home/allowkeeper/$sysaccount/$prefix.ip.$shortGroup") {
-
-        # -l => test that file exists and is a symlink
-        # -r => test that the symlink dest still exists => REMOVED, because we (the caller) might not have the right to read the file if we're not member or guest ourselves
-        $weare = 'member';
-    }
-
-    return R('OK') if ($weare eq $want);
-    return R('KO');
-}
-
-# test if account is strictly a guest (i.e. if a member, then answer is no)
-sub is_group_guest {
-    my %p = @_;
-    return _is_group_member_or_guest(want => 'guest', group => $p{'group'}, account => $p{'account'});
-}
-
-# test if account is strictly a member (i.e. if a guest, then answer is no)
-sub is_group_member {
-    my %p = @_;
-    return _is_group_member_or_guest(want => 'member', group => $p{'group'}, account => $p{'account'});
 }
 
 sub is_valid_ttl {

@@ -31,18 +31,15 @@ if (!$pRealm) {
 my $RealmSupportAccount = OVH::Bastion::Account->newFromName("realm_$pRealm", type => "realm", check => 1);
 $RealmSupportAccount or osh_exit($RealmSupportAccount);
 
-$fnret = $RealmSupportAccount->getRemoteAccountsNames();
+$fnret = $RealmSupportAccount->getRemoteAccounts();
 $fnret or osh_exit $fnret;
 
-my @accounts = sort @{$fnret->value};
 my %details;
 
-if (@accounts) {
+my @list = @{ $fnret->value };
+if (@list) {
     osh_info "The following accounts from realm ".$RealmSupportAccount->realm." are known:";
-    foreach my $account (@accounts) {
-        my $RemoteAccount = OVH::Bastion::Account->newFromName($account, check => 1);
-        $RemoteAccount or next;
-
+    foreach my $RemoteAccount (@list) {
         $fnret = $RemoteAccount->getAllAcls();
         my $nb = $fnret ? scalar(@{$fnret->value}) : "?";
         $details{$RemoteAccount->name} = {accesses => ($fnret ? scalar(@{$fnret->value}) : undef)};
@@ -56,4 +53,4 @@ else {
     osh_info("No remote accounts from realm " . $RealmSupportAccount->realm . " have accesses yet.");
 }
 
-osh_ok({realm => $RealmSupportAccount->realm, accounts => \@accounts, account_details => \%details});
+osh_ok({realm => $RealmSupportAccount->realm, accounts => \@list, account_details => \%details});

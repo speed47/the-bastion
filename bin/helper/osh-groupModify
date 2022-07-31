@@ -49,26 +49,18 @@ if (!$mfaRequired && !defined $ttl && !defined $idleLockTimeout && !defined $idl
 
 #<HEADER
 
-#>PARAMS:GROUP
-$fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => "key");
-$fnret or HEXIT($fnret);
+my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+$Group or HEXIT($Group);
 
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
-
-#<PARAMS:GROUP
-
-#>RIGHTSCHECK
-if ($self eq 'root') {
+if ($Self->isLocalRoot) {
     osh_debug "Real root, skipping checks of permissions";
 }
-$fnret = OVH::Bastion::is_group_owner(account => $self, group => $shortGroup, superowner => 1);
-if (!$fnret) {
-    HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $self");
+else {
+    $fnret = $Group->hasOwner($Self, superowner => 1);
+    if (!$fnret) {
+        HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $Self");
+    }
 }
-
-#<RIGHTSCHECK
 
 #>CODE
 my %result;
@@ -76,12 +68,12 @@ my %result;
 if (defined $mfaRequired) {
     osh_info "Modifying mfa-required policy of group...";
     if (grep { $mfaRequired eq $_ } qw{ password totp any none }) {
-        $fnret = OVH::Bastion::group_config(group => $group, key => "mfa_required", value => $mfaRequired);
+        $fnret = $Group->setConfig("mfa_required" => $mfaRequired);
         if ($fnret) {
             osh_info "... done, policy is now: $mfaRequired";
         }
         else {
-            osh_warn "... error while changing mfa-required policy (" . $fnret->msg . ")";
+            osh_warn "... error while changing mfa-required policy ($fnret)";
         }
         $result{'mfa_required'} = $fnret;
     }
@@ -94,12 +86,12 @@ if (defined $mfaRequired) {
 my %idleTimeout = (
     lock => {
         name  => "idle lock timeout",
-        key   => \%{OVH::Bastion::OPT_GROUP_IDLE_LOCK_TIMEOUT()},
+        key   => 'idle_lock_timeout',
         value => $idleLockTimeout,
     },
     kill => {
         name  => "idle kill timeout",
-        key   => \%{OVH::Bastion::OPT_GROUP_IDLE_KILL_TIMEOUT()},
+        key   => "idle_kill_timeout",
         value => $idleKillTimeout,
     },
 );
@@ -107,48 +99,33 @@ my %idleTimeout = (
 foreach my $item (keys %idleTimeout) {
     next if !defined $idleTimeout{$item}{'value'};
 
-    osh_info "Modifying " . $idleTimeout{$item}{'name'} . " policy of group...";
+    my $name = $idleTimeout{$item}{'name'};
+    osh_info "Modifying $name policy of group...";
+
     if ($idleTimeout{$item}{'value'} >= 0) {
-        $fnret = OVH::Bastion::group_config(
-            group => $group,
-            %{$idleTimeout{$item}{'key'}}, value => $idleTimeout{$item}{'value'}
-        );
+        $fnret = $Group->setConfig($idleTimeout{$item}{'key'} => $idleTimeout{$item}{'value'});
         if ($fnret) {
             if ($idleTimeout{$item}{'value'} == 0) {
-                osh_info "... done, this group's " . $idleTimeout{$item}{'name'} . " policy is now set to: disabled";
+                osh_info "... done, this group's $name policy is now set to: disabled";
             }
             else {
-                osh_info "... done, this group is now configured to use a "
-                  . $idleTimeout{$item}{'name'}
-                  . " policy of "
+                osh_info "... done, this group is now configured to use a $name policy of "
                   . OVH::Bastion::duration2human(seconds => $idleTimeout{$item}{'value'})->value->{'human'};
             }
         }
         else {
-            osh_warn "... error while setting the group-specific "
-              . $idleTimeout{$item}{'name'}
-              . " policy ("
-              . $fnret->msg . ")";
-            warn_syslog "Error setting the group-specific "
-              . $idleTimeout{$item}{'name'}
-              . " policy of $group ("
-              . $fnret->msg . ")";
+            osh_warn "... error while setting the group-specific $name policy ($fnret)";
+            warn_syslog "Error setting the group-specific $name policy of $Group ($fnret)";
         }
     }
     else {
-        $fnret = OVH::Bastion::group_config(group => $group, %{$idleTimeout{$item}{'key'}}, delete => 1);
+        $fnret = $Group->deleteConfig($idleTimeout{$item}{'key'});
         if ($fnret) {
-            osh_info "... done, this group will now use the global " . $idleTimeout{$item}{'name'} . " policy";
+            osh_info "... done, this group will now use the global $name policy";
         }
         else {
-            osh_warn "... error while removing the group-specific "
-              . $idleTimeout{$item}{'name'}
-              . " policy ("
-              . $fnret->msg . ")";
-            warn_syslog "Error removing the group-specific "
-              . $idleTimeout{$item}{'name'}
-              . " policy of $group ("
-              . $fnret->msg . ")";
+            osh_warn "... error while removing the group-specific $name policy ($fnret)";
+            warn_syslog "Error removing the group-specific $name policy of $Group ($fnret)";
         }
     }
     $result{$idleTimeout{$item}{'key'}} = $fnret;
@@ -157,22 +134,22 @@ foreach my $item (keys %idleTimeout) {
 if (defined $ttl) {
     osh_info "Modifying guest TTL limit policy of group...";
     if ($ttl > 0) {
-        $fnret = OVH::Bastion::group_config(group => $group, key => "guest_ttl_limit", value => $ttl);
+        $fnret = $Group->setConfig("guest_ttl_limit" => $ttl);
         if ($fnret) {
             osh_info "... done, guest accesses must now have a TTL set on creation, with maximum allowed duration of "
               . OVH::Bastion::duration2human(seconds => $ttl)->value->{'human'};
         }
         else {
-            osh_warn "... error while setting guest-ttl-limit (" . $fnret->msg . ")";
+            osh_warn "... error while setting guest-ttl-limit ($fnret)";
         }
     }
     else {
-        $fnret = OVH::Bastion::group_config(group => $group, key => "guest_ttl_limit", delete => 1);
+        $fnret = $Group->deleteConfig("private/guest_ttl_limit");
         if ($fnret) {
             osh_info "... done, guest accesses no longer need to have a TTL set";
         }
         else {
-            osh_warn "... error while removing guest-ttl-limit (" . $fnret->msg . ")";
+            osh_warn "... error while removing guest-ttl-limit ($fnret)";
         }
     }
     $result{'guest_ttl_limit'} = $fnret;

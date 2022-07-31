@@ -47,12 +47,14 @@ if (!$result) {
 OVH::Bastion::Helper::check_spurious_args();
 
 osh_debug("groupSetRole: checking preconditions");
-use Data::Dumper;
-print Dumper("MIGRA in osh_groupsetrolee: self=$Self account=$account role=$role");
+
+my $Group = OVH::Bastion::Group->newFromSysGroup($group);
+$Group or HEXIT($Group);
+
 $fnret = OVH::Bastion::Plugin::groupSetRole::preconditions(
     Self           => $Self,
     account        => $account,
-    group          => $group,
+    Group          => $Group,
     action         => $action,
     role           => $role,
     isHelper       => 1,
@@ -63,53 +65,34 @@ $fnret or HEXIT($fnret);
 $role = $fnret->value->{'role'};
 my $Account = $fnret->value->{'Account'};
 
-my $Group = OVH::Bastion::Group->newFromSysGroup($group, check => 1);
-$Group or HEXIT($Group);
-
-my $shortGroup = $Group->name;
-$group = $Group->sysGroup;
-#<PARAMS:GROUP
-
 #>RIGHTSCHECK
 #done in Plugin::groupSetRole::preconditions
 #<RIGHTSCHECK
 
 #>CODE
-if ($role eq 'owner') {
-    $fnret = $Group->hasOwner($Account);
-}
-elsif ($role eq 'gatekeeper') {
-    $fnret = $Group->hasGatekeeper($Account);
-}
-elsif ($role eq 'aclkeeper') {
-    $fnret = $Group->hasAclkeeper($Account);
-}
-elsif ($role eq 'member') {
-    $fnret = $Group->hasMember($Account);
-}
-elsif ($role eq 'guest') {
-    $fnret = $Group->hasGuest($Account);
-}
-$fnret->is_err and HEXIT($fnret);
+$fnret = $Group->hasRole($Account, role => $role);
+HEXIT($fnret) if $fnret->is_err;
 
 if ($action eq 'add' && $fnret->is_ok) {
-    osh_debug("groupSetRole: Account $Account was already a $role of group $shortGroup, nothing to do");
-    HEXIT('OK_NO_CHANGE', msg => "Account $Account was already a $role of group $shortGroup, nothing to do");
+    osh_debug("groupSetRole: Account $Account was already a $role of group $Group, nothing to do");
+    HEXIT('OK_NO_CHANGE', msg => "Account $Account was already a $role of group $Group, nothing to do");
 }
 elsif ($action eq 'del' && $fnret->is_ko) {
-    osh_debug("groupSetRole: Account $Account was not a $role of group $shortGroup, nothing to do");
-    HEXIT('OK_NO_CHANGE', msg => "Account $Account was not a $role of group $shortGroup, nothing to do");
+    osh_debug("groupSetRole: Account $Account was not a $role of group $Group, nothing to do");
+    HEXIT('OK_NO_CHANGE', msg => "Account $Account was not a $role of group $Group, nothing to do");
 }
 
 # add/del from sysgroup
-my $groupName = ((grep { $role eq $_ } qw{ guest member }) ? $group : "$group-$role");
+$fnret = $Group->sysGroupFromRole($role);
+$fnret or HEXIT($fnret);
 
-osh_debug("going to $action account $Account to/from $groupName");
+my $roleSysGroup = $fnret->value;
+
+osh_debug("Going to $action account $Account to/from $Group with role $role (sysgroup=$roleSysGroup)");
 $fnret = R('OK', silent => 1);
 if ($action eq 'add') {
-
-    if (!OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => $groupName)) {
-        $fnret = OVH::Bastion::sys_addmembertogroup(group => $groupName, user => $Account->sysUser, noisy_stderr => 1);
+    if (!OVH::Bastion::is_user_in_group(user => $Account->sysUser, group => $roleSysGroup)) {
+        $fnret = OVH::Bastion::sys_addmembertogroup(group => $roleSysGroup, user => $Account->sysUser, noisy_stderr => 1);
     }
 }
 elsif ($action eq 'del') {
@@ -117,14 +100,13 @@ elsif ($action eq 'del') {
     # if other remote users are still members: check whether this account was the last one, of if there
     # are others
     my $otherMembers = 0;
-    if ($Account->realm) {
-        $fnret = $Account->getRemoteAccountsNames;
+    if ($Account->type eq 'realm') {
+        $fnret = $Account->getRemoteAccounts;
         $fnret or HEXIT($fnret);
 
-        foreach my $remoteAccountName (@{$fnret->value}) {
-            next if ($remoteAccountName eq $Account->remoteName);
-            my $RemoteAccount = OVH::Bastion::Account->newFromName(sprintf("%s/%s", $Account->realm, $remoteAccountName), type => "remote");
-            if ($RemoteAccount && $Group->hasMemberOrGuest($RemoteAccount)) {
+        foreach my $RemoteAccount (@{$fnret->value}) {
+            next if ($RemoteAccount->remoteName eq $Account->remoteName);
+            if ($Group->hasMemberOrGuest($RemoteAccount)) {
                 $otherMembers++;
                 last;
             }
@@ -132,15 +114,15 @@ elsif ($action eq 'del') {
     }
     if (!$otherMembers) {
         $fnret =
-          OVH::Bastion::sys_delmemberfromgroup(group => $groupName, user => $Account->sysUser, noisy_stderr => 1);
+          OVH::Bastion::sys_delmemberfromgroup(group => $roleSysGroup, user => $Account->sysUser, noisy_stderr => 1);
     }
 }
 else {
     HEXIT('ERR_INTERNAL');    # unreachable
 }
 if ($fnret->err ne 'OK') {
-    osh_debug('Unable to modify group: ' . $fnret->msg);
-    HEXIT('ERR_INTERNAL', msg => "Error while doing $action on account $Account from $role list of $shortGroup");
+    osh_debug("Unable to modify group: $fnret");
+    HEXIT('ERR_INTERNAL', msg => "Error while doing $action on account $Account from $role list of $Group");
 }
-osh_debug("groupSetRole: Account $action of $Account done on $role list of $shortGroup");
-HEXIT('OK', msg => "Account $action of $Account done on $role list of $shortGroup");
+osh_debug("groupSetRole: Account $action of $Account done on $role list of $Group");
+HEXIT('OK', msg => "Account $action of $Account done on $role list of $Group");

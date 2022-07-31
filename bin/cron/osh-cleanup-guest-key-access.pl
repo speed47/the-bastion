@@ -93,72 +93,60 @@ if (!$fnret) {
     _err "Couldn't get group list:" . $fnret->msg;
     exit 1;
 }
-my $groups = $fnret->value;
+my %groups = %{ $fnret->value || {} };
 
-foreach my $shortGroup (sort keys %$groups) {
-    foreach my $account (@{$groups->{$shortGroup}{'members'}}) {
-        next if ($account eq 'allowkeeper');    # don't need to check this special user
+foreach my $groupName (sort keys %groups) {
+    my $Group = $groups{$groupName};
 
-        _log "<$shortGroup/$account> checking if group guest..." if $verbose;
+    $fnret = $Group->getGuests(wantObjects => 1);
+    $fnret or next;
 
-        # rule out realm accounts, we would need to check every remote account's info
-        next if ($account =~ /^realm_/);
+    foreach my $Account (@{ $fnret->value }) {
+        _log "<$Group/$Account> found a guest, checking remaining accesses..." if $verbose;
 
-        # the "members" of the system group key$shortGroup might be either members or guests,
-        # so we first rule out members
-        next if OVH::Bastion::is_group_member(account => $account, group => $shortGroup);
+        if ($Account->type ne 'local') {
+            # rule out realm accounts, we would need to check every remote account's info
+            _log "<$Group/$Account> skipping as it's not a local account" if $verbose;
+            next;
+        }
 
-        # it seems to be a guest, double-check that
-        next if !OVH::Bastion::is_group_guest(account => $account, group => $shortGroup);
-
-        _log "<$shortGroup/$account> found a guest, checking remaining accesses..." if $verbose;
-
-        # okay, any access remaining?
-        $fnret = OVH::Bastion::get_acl_way(way => 'groupguest', group => $shortGroup, account => $account);
+        # okay, any accesses remaining?
+        $fnret = OVH::Bastion::get_acl_way(way => 'groupguest', group => $Group->name, account => $Account->name);
         if (!$fnret) {
-            _warn "<$shortGroup/$account> Error getting guest accesses ($fnret), skipping";
+            _warn "<$Group/$Account> Error getting guest accesses ($fnret), skipping";
             next;
         }
         elsif ($fnret->err eq 'OK') {
-            _log "<$shortGroup/$account> The account still has "
+            _log "<$Group/$Account> The account still has "
               . (@{$fnret->value})
               . " accesses to the group, skipping"
               if $verbose;
             next;
         }
         elsif ($fnret->err eq 'OK_EMPTY' && !@{$fnret->value}) {
-
             # this is a guest, but no ACL remains (probably the last one had a TTL),
             # so we'll cleanup this guest
             if ($dryRun) {
-                _log
-                  "<$shortGroup/$account> The account is a guest of group but has no remaining access, would have cleaned up in non-dry-run mode";
+                _log "<$Group/$Account> The account is a guest of group but has no remaining access, "
+                .   "would have cleaned up in non-dry-run mode";
                 next;
             }
-            _log "<$shortGroup/$account> The account is a guest of group but has no remaining access, cleaning up...";
-
-            # get $group from $shortGroup
-            $fnret = OVH::Bastion::is_valid_group_and_existing(group => $shortGroup, groupType => 'key');
-            if (!$fnret) {
-                _warn "<$shortGroup/$account> Group seems invalid ($fnret), skipping";
-                next;
-            }
-            my $group = $fnret->value->{'group'};
+            _log "<$Group/$Account> The account is a guest of group but has no remaining access, cleaning up...";
 
             # remove account from group
             my @command = qw{ /usr/bin/env perl -T };
             push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupSetRole';
             push @command, '--type', 'guest';
-            push @command, '--group', $group;
-            push @command, '--account', $account;
+            push @command, '--group', $Group->name;
+            push @command, '--account', $Account->name;
             push @command, '--action', 'del';
             $fnret = OVH::Bastion::helper(cmd => \@command);
 
             if (!$fnret) {
-                _err "<$shortGroup/$account> Failed to revoke key access: $fnret";
+                _err "<$Group/$Account> Failed to revoke key access: $fnret";
             }
             else {
-                _log "<$shortGroup/$account> Key access revoked";
+                _log "<$Group/$Account> Key access revoked";
             }
         }
     }

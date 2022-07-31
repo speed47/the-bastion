@@ -61,48 +61,32 @@ if ($comment) {
 
 #<HEADER
 
-#>RIGHTSCHECK
-if ($self eq 'root') {
+if ($Self->isLocalRoot) {
     osh_debug "Real root, skipping checks of permissions";
 }
 else {
-    # need to perform another security check
-    $fnret = OVH::Bastion::is_user_in_group(user => $self, group => "osh-groupCreate");
-    if (!$fnret) {
-        HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $self");
+    if (!$Self->hasRole("groupCreate")) {
+        HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $Self");
     }
 }
 
-#<RIGHTSCHECK
+my $OwnerAccount = OVH::Bastion::Account->newFromName($owner, check => 1);
+$OwnerAccount or HEXIT($OwnerAccount);
 
-#>PARAMS:ACCOUNT
-osh_debug("Checking owner");
-$fnret = OVH::Bastion::is_bastion_account_valid_and_existing(account => $owner);
-$fnret or HEXIT($fnret);
+# group must pass sanity checks (name and such) but NOT exist already
+my $Group = OVH::Bastion::Group->newFromName($group);
+$Group or HEXIT($Group);
 
-# get returned untainted value
-$owner = $fnret->value->{'account'};
+HEXIT('ERR_GROUP_ALREADY_EXISTS', msg => "The group '$group' already exits") if $Group->isExisting;
 
-#<PARAMS:ACCOUNT
-
-#>PARAMS:GROUP
-osh_debug("checking group");
-$fnret = OVH::Bastion::is_valid_group(group => $group, groupType => "key");
-$fnret or HEXIT($fnret);
-
-# get returned untainted value
-$group = $fnret->value->{'group'};
-my $shortGroup = $fnret->value->{'shortGroup'};
-
-foreach my $test ($group, "$group-gatekeeper", "$group-owner") {
-    $fnret = OVH::Bastion::is_group_existing(group => $test);
-    $fnret->is_err and HEXIT($fnret);
-    my (undef, $displayGroup) = $test =~ m/^(key)?(.+)/;
-    $fnret->is_ok and HEXIT('KO_ALREADY_EXISTING', msg => "The group $displayGroup already exists");
+# FIXME MIGRA replace by $Group->canBeCreated();
+foreach my $test ($Group->sysGroup, $Group->sysGroupAclkeeper, $Group->sysGroupGatekeeper, $Group->sysGroupOwner) {
+    $fnret = OVH::Bastion::sys_getgr_name(name => $test);
+    $fnret and HEXIT('KO_ALREADY_EXISTING', msg => "The group $Group already exists");
 }
 
-if (getpwnam($group)) {
-    HEXIT('KO_ALREADY_EXISTING', msg => "The account $group already exists");
+if (OVH::Bastion::sys_getpw_name(name => $Group->sysUser)) {
+    HEXIT('KO_ALREADY_EXISTING', msg => "The group $Group already exists");
 }
 
 #<PARAMS:GROUP
@@ -141,31 +125,41 @@ if ($encrypted) {
 }
 
 # First create group
-osh_info("Creating groups");
-foreach my $tocreate ($group, "$group-aclkeeper", "$group-gatekeeper", "$group-owner") {
+osh_info("Creating system groups...");
+foreach my $tocreate ($Group->sysGroup, $Group->sysGroupOwner, $Group->sysGroupGatekeeper, $Group->sysGroupAclkeeper) {
     $fnret = OVH::Bastion::sys_groupadd(group => $tocreate, noisy_stderr => 1);
-    $fnret->err eq 'OK'
-      or
-      HEXIT('ERR_GROUPADD_FAILED', msg => "Error while running groupadd command for $tocreate (" . $fnret->msg . ")");
+    if ($fnret->err ne 'OK') {
+        HEXIT('ERR_GROUPADD_FAILED', msg => "Error while creating group '$tocreate' (" . $fnret->msg . ")");
+    }
 }
 
-osh_debug("Creating directory");
-mkdir "/home/keykeeper/$group";
-chmod 0755, "/home/keykeeper/$group";
+osh_debug("Creating directories");
+if (!mkdir $Group->keyHome) {
+    warn_syslog("Couldn't create key directory of $Group: $!, attempting to continue anyway");
+}
+chmod 0755, $Group->keyHome;
 
-osh_info("Creating user corresponding to group $shortGroup");
+osh_info("Creating user corresponding to group $Group...");
 
 # if a comment has been set, we'll store it as the user's GECOS corresponding to the group name
 # user is member of the group, cannot login and have no password
-$fnret =
-  OVH::Bastion::sys_useradd(user => $group, gid => $group, shell => undef, comment => $comment, noisy_stderr => 1);
-$fnret->err eq 'OK'
-  or HEXIT('ERR_USERADD_FAILED',
-    msg => "Error while adding corresponding user of group $shortGroup (" . $fnret->msg . ")");
+$fnret = OVH::Bastion::sys_useradd(
+    user => $Group->sysGroup,
+    gid => $Group->sysGroup,
+    shell => undef,
+    comment => $comment,
+    noisy_stderr => 1
+);
+
+if ($fnret->err ne 'OK') {
+    HEXIT('ERR_USERADD_FAILED',
+        msg => "Error while adding corresponding user of group $Group ($fnret)");
+}
 
 # Building /home/$group
-OVH::Bastion::touch_file("/home/$group/allowed.ip");
+OVH::Bastion::touch_file($Group->allowedIpFile);
 
+$group = $Group->sysGroup;
 osh_info("Adjusting permissions...");
 my $bigX = (OVH::Bastion::is_linux() ? 'X' : 'x');
 foreach my $command (
@@ -188,11 +182,15 @@ foreach my $gr ("$group-owner", "$group-gatekeeper", "$group-aclkeeper", "osh-wh
       or HEXIT('ERR_SETFACL_FAILED', msg => "Error setting ACLs on group homedir");
 }
 
+my $keykeeper_uid = (getpwnam('keykeeper'))[2];
+my $group_gid     = (getgrnam($group))[2];
+chown $keykeeper_uid, $group_gid, "/home/keykeeper/$group";
+
 osh_debug("Adding allowkeeper to group $group");
 $fnret = OVH::Bastion::sys_addmembertogroup(group => $group, user => 'allowkeeper');
 $fnret or HEXIT($fnret);
 
-osh_info("Adding $owner to owner, gatekeeper, aclkeeper and main groups of $shortGroup");
+osh_info("Adding $owner to proper system groups of $Group...");
 
 # temporarily set ourselves owner manually so that we can add the wanted owner properly
 # as owner/gatekeeper/member then revoke our own right
@@ -224,7 +222,7 @@ foreach my $todo (@todoList) {
     $fnret = OVH::Bastion::Plugin::groupSetRole::act(
         Self           => $Self,
         account        => $todo->{'account'},
-        group          => $shortGroup,
+        group          => $Group->name,
         action         => $todo->{'action'},
         role           => $todo->{'role'},
         silentoverride => 1
@@ -232,14 +230,11 @@ foreach my $todo (@todoList) {
     $fnret or HEXIT($fnret);
 }
 
-my $keykeeper_uid = (getpwnam('keykeeper'))[2];
-my $group_gid     = (getgrnam($group))[2];
-chown $keykeeper_uid, $group_gid, "/home/keykeeper/$group";
 if (!$no_key) {
     osh_info("Generating main group key, this might take a few seconds...");
 
     $fnret = OVH::Bastion::generate_ssh_key(
-        prefix         => $shortGroup,
+        prefix         => $Group->name,
         folder         => "/home/keykeeper/$group",
         size           => $size,
         algo           => $algo,
@@ -265,7 +260,7 @@ OVH::Bastion::syslogFormatted(
     type     => 'group',
     fields   => [
         ['action',                   'create'],
-        ['group',                    $shortGroup],
+        ['group',                    $Group->name],
         ['owner',                    $owner],
         ['egress_ssh_key_algorithm', $algo],
         ['egress_ssh_key_size',      $size],
@@ -274,4 +269,4 @@ OVH::Bastion::syslogFormatted(
 );
 
 # done at last!
-HEXIT('OK', value => {group => $shortGroup, owner => $owner});
+HEXIT('OK', value => {group => $Group->name, owner => $owner});

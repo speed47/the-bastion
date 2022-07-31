@@ -80,7 +80,10 @@ if (!$pubKey) {
 }
 
 $fnret = OVH::Bastion::is_valid_public_key(pubKey => $pubKey, way => 'ingress');
-$fnret or osh_exit $fnret;
+if (!$fnret) {
+    osh_info "Here is what we got: '$pubKey'";
+    osh_exit $fnret;
+}
 
 #
 # Now create it

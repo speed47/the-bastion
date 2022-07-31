@@ -19,7 +19,7 @@ testsuite_accountinfo()
 
     # grant account0 as admin
     success set_a0_as_admin $r0 "\". $opt_remote_basedir/lib/shell/functions.inc; add_user_to_group_compat $account0 osh-admin\""
-    configchg 's=^\\\\x22adminAccounts\\\\x22.+=\\\\x22adminAccounts\\\\x22:[\\\\x22'"$account0"'\\\\x22],='
+    configset adminAccounts "[\\\"$account0\\\"]"
 
     # grant account1 as auditor
     success a0_grant_a1_as_auditor $a0 --osh accountGrantCommand --command auditor --account $account1

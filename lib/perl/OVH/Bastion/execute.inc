@@ -70,7 +70,7 @@ sub execute {
     my $max_stdout_bytes = $p{'max_stdout_bytes'}; # if the amount of stored stdout bytes exceeds this, halt the command and return to caller
     my $system           = $p{'system'};           # if set to 1, will use system() instead of open3(), needed for some plugins
 
-    $noisy_stderr = $noisy_stdout = 1 if ($ENV{'PLUGIN_DEBUG'} or $is_binary);
+    $noisy_stderr = $noisy_stdout = 1 if ($ENV{'OSH_DEBUG'} or $is_binary);
 
     my $readsize = $is_binary ? 16384 : 1;         # XXX needs to be enhanced to be > 1 even for non-binary
 

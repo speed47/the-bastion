@@ -245,6 +245,7 @@ my %_autoload_files = (
           sys_addmembertogroup
           sys_changepassword
           sys_delmemberfromgroup
+          sys_clear_cache
           sys_getgr_all
           sys_getgr_all_cached
           sys_getgr_name
@@ -451,10 +452,12 @@ sub osh_ok {    ## no critic (ArgUnpacking)
 
 sub osh_debug {
     my $text = shift;
-    if (($ENV{'PLUGIN_DEBUG'} or $ENV{'OSH_DEBUG'}) and not $ENV{'PLUGIN_QUIET'}) {
+    if ($ENV{'OSH_DEBUG'} && !$ENV{'PLUGIN_QUIET'}) {
         foreach my $line (split /^/, $text) {
             chomp $line;
-            print STDERR colored("~ <$$:$0> $line", 'bold black') . "\n";
+            my $exename = $0;
+            $exename =~ s{.*/}{};
+            print STDERR colored("DBG:$exename\[$$\] $line", 'bold black') . "\n";
         }
     }
     return;
@@ -803,7 +806,7 @@ sub get_passfile {
     }
     elsif ($context eq 'group') {
 
-        # new mode: nameHint is actually the name of a group (technically, shortGroup)
+        # new mode: nameHint is actually the name of a group
         my $passFile = "/home/key$nameHint/pass/$nameHint";
         return R('OK', value => $passFile) if (-f -r $passFile);
 
@@ -1022,7 +1025,7 @@ sub can_use_utf8 {
 }
 
 sub call_stack {
-    my $i = 1;
+    my $i = $_[0] + 1;
     my $callerStack = sprintf("%s", (caller($i))[3]);
     $i++;
     while (caller($i)) {
@@ -1073,16 +1076,16 @@ sub check_args {
     push @errorMissing, keys %unseenMandatory;
 
     # log verbose info in logs
-    my $callerStack = OVH::Bastion::call_stack();
+    my $callerStack = OVH::Bastion::call_stack(1);
     warn_syslog(
         sprintf(
-            "check_args: mandatory parameters '@errorMissing' missing in call to '%s' by '%s'",
-            $callerStack, $0
+            "check_args: mandatory parameters '@errorMissing' missing in call to %s",
+            $callerStack
         )
     ) if @errorMissing;
-    warn_syslog(sprintf("check_args: unknown parameters '@errorUnknown' in func '%s' by '%s'", $callerStack, $0))
+    warn_syslog(sprintf("check_args: unknown parameters '@errorUnknown' in call to %s", $callerStack))
       if @errorUnknown;
-    warn_syslog(sprintf("check_args: false value for parameters '@errorFalse' in func '%s' by '%s'", $callerStack, $0))
+    warn_syslog(sprintf("check_args: false value for parameters '@errorFalse' in call to %s", $callerStack))
       if @errorFalse;
 
     return R('ERR_MISSING_ARGUMENT', msg => "Missing arguments: @errorMissing") if @errorMissing;

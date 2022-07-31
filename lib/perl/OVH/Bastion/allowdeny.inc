@@ -784,18 +784,16 @@ sub is_access_granted {
         foreach my $access (@grants) {
             my %data;
             if ($access->{'type'} =~ /^group/ and $access->{'group'}) {
-                my $Group = OVH::Bastion::Group->newFromName($access->{'group'}, check => 1);
+                my $Group = OVH::Bastion::Group->newFromName($access->{'group'}, check => 1); # FIXME we should use cache here
                 $Group or next;
                 $data{'keys'} = $Group->getKeys(
                         listOnly => $listOnly,
                         noexec   => $noexec,
                         forceKey => $access->{'forceKey'}
                 );
-                $data{'mfa'} = OVH::Bastion::group_config(key => "mfa_required", group => $access->{'group'});
-                $data{'idle_lock_timeout'} = OVH::Bastion::group_config(%{OVH::Bastion::OPT_GROUP_IDLE_LOCK_TIMEOUT()},
-                    group => $access->{'group'});
-                $data{'idle_kill_timeout'} = OVH::Bastion::group_config(%{OVH::Bastion::OPT_GROUP_IDLE_KILL_TIMEOUT()},
-                    group => $access->{'group'});
+                $data{'mfa'} = $Group->getConfig("mfa_required");
+                $data{'idle_lock_timeout'} = $Group->getConfig("idle_lock_timeout");
+                $data{'idle_kill_timeout'} = $Group->getConfig("idle_kill_timeout");
             }
             elsif ($access->{'type'} =~ /^personal/) {
                 $data{'keys'} = $Account->getPersonalKeys(
@@ -959,8 +957,7 @@ sub ssh_test_access_way {
 # i.e. personal or legacy access of an account, group access, or groupguest access.
 # it just calls get_acl_from_file() with the proper file location
 # returns: arrayref of entries, entry: { ip,user,port,forceKey,forcePassword,addedBy,addedDate,comment }
-my %_cache_get_acl_way;
-
+memoize('get_acl_way');
 sub get_acl_way {
     my %params  = @_;
     my $way     = delete $params{'way'};        # personal|group|groupguest|legacy
@@ -969,58 +966,52 @@ sub get_acl_way {
 
     my $fnret;
     my $Account;
-    my $key    = $way;
+    my $Group;
     my $prefix = 'allowed';
 
     return R('ERR_MISSING_PARAMETER', msg => "Missing argument 'way'") if not defined $way;
+
+    osh_debug("get_acl_way with account=$account group=$group way=$way");
 
     if ($account) {
         $Account = OVH::Bastion::Account->newFromName($account, check => 1);
         $Account or return $Account;
         $prefix = "allowed_" . $Account->remoteName if $Account->remoteName;
-        $key .= ":$account";
     }
 
-    my $shortGroup;
     if ($group) {
-        $fnret = OVH::Bastion::is_valid_group_and_existing(group => $group, groupType => 'key');
-        $fnret or return $fnret;
-
-        $group      = $fnret->value->{'group'};        # untainted version
-        $shortGroup = $fnret->value->{'shortGroup'};
-        $key .= ":$group";
+        $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+        $Group or return $Group;
     }
-
-    return $_cache_get_acl_way{$key} if exists $_cache_get_acl_way{$key};
 
     if ($way eq 'personal') {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'account' for $way way") if not $account;
+        return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'account' for $way way") if !$Account;
         if (OVH::Bastion::is_mocking()) {
             return _get_acl_from_file(
-                mock_data => OVH::Bastion::mock_get_account_personal_accesses(account => $account));
+                mock_data => OVH::Bastion::mock_get_account_personal_accesses(account => $Account->name));
         }
         if (!(-f -r $Account->allowedPrivateFile)) {
             return R('ERR_PERMISSION_DENIED',
                 msg => "Couldn't open permission file with your current rights or it doesn't exist");
         }
-        $_cache_get_acl_way{$key} = _get_acl_from_file(file => $Account->allowedPrivateFile);
+        return _get_acl_from_file(file => $Account->allowedPrivateFile);
     }
     elsif ($way eq 'legacy') {
         return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'account' for $way way") if not $account;
         if (OVH::Bastion::is_mocking()) {
-            return _get_acl_from_file(mock_data => OVH::Bastion::mock_get_account_legacy_accesses(account => $account));
+            return _get_acl_from_file(mock_data =>
+                OVH::Bastion::mock_get_account_legacy_accesses(account => $Account->name));
         }
         if (-f $Account->allowedPrivateFile && !-e $Account->allowedIpFile) {
-
             # legacy file doesn't exist: no legacy rights
-            $_cache_get_acl_way{$key} = R('OK_EMPTY', value => []);
+            return R('OK_EMPTY', value => []);
         }
         elsif (!(-f -r $Account->allowedIpFile)) {
             return R('ERR_PERMISSION_DENIED',
                 msg => "Couldn't open permission file with your current rights or it doesn't exist");
         }
         else {
-            $_cache_get_acl_way{$key} = _get_acl_from_file(file => $Account->allowedIpFile);
+            return _get_acl_from_file(file => $Account->allowedIpFile);
         }
     }
     elsif ($way eq 'group') {
@@ -1028,37 +1019,35 @@ sub get_acl_way {
         if (OVH::Bastion::is_mocking()) {
             return _get_acl_from_file(mock_data => OVH::Bastion::mock_get_group_accesses(group => $group));
         }
-        if (!(-f -r "/home/$group/$prefix.ip")) {
+        if (!(-f -r $Group->allowedIpFile)) {
             return R('ERR_PERMISSION_DENIED',
                 msg => "Couldn't open permission file with your current rights or it doesn't exist");
         }
-        $_cache_get_acl_way{$key} = _get_acl_from_file(file => "/home/$group/$prefix.ip");
+        return _get_acl_from_file(file => $Group->allowedIpFile);
     }
     elsif ($way eq 'groupguest') {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'account' or 'group' for $way way")
-          if (not $group or not $account);
+        if (!$group || !$account) {
+            return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'account' or 'group' for $way way")
+        }
         if (OVH::Bastion::is_mocking()) {
-            return _get_acl_from_file(
-                mock_data => OVH::Bastion::mock_get_account_guest_accesses(group => $group, account => $account));
+            return _get_acl_from_file(mock_data =>
+                OVH::Bastion::mock_get_account_guest_accesses(group => $Group->name, account => $Account->name));
         }
         if (-f $Account->allowedPrivateFile
-            && !-e ("/home/allowkeeper/" . $Account->sysUser . "/$prefix.partial.$shortGroup"))
+            && !-e $Account->allowedGuestFile($Group))
         {
-
             # guest file doesn't exist: no guest rights
-            $_cache_get_acl_way{$key} = R('OK_EMPTY', value => []);
+            return R('OK_EMPTY', value => []);
         }
-        elsif (!(-f -r ("/home/allowkeeper/" . $Account->sysUser . "/$prefix.partial.$shortGroup"))) {
+        elsif (!(-f -r $Account->allowedGuestFile($Group))) {
             return R('ERR_PERMISSION_DENIED',
                 msg => "Couldn't open permission file with your current rights or it doesn't exist");
         }
         else {
-            $_cache_get_acl_way{$key} =
-              _get_acl_from_file(file => "/home/allowkeeper/" . $Account->sysUser . "/$prefix.partial.$shortGroup");
+            return _get_acl_from_file(file => $Account->allowedGuestFile($Group));
         }
     }
 
-    return $_cache_get_acl_way{$key} if exists $_cache_get_acl_way{$key};
     return R('ERR_INVALID_PARAMETER',
         msg => "Expected a parameter way with allowed values [personal,legacy,group,groupguest]");
 }
