@@ -94,7 +94,7 @@ push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-accountDelete';
 push @command, "--type", "normal", "--account", $Account->name;
 
 # as the helper can take a long time to complete (because of tar), and caller in front
-# of his ssh console might close it's end without waiting, tar would get a SIGHUP and
+# of their ssh console might close their end without waiting, tar would get a SIGHUP and
 # stop. we don't want this: use setsid to be in our own session. we fork() first because
 # if we are a process group leader, setsid() would fail
 my $child = fork();
@@ -108,4 +108,4 @@ if (POSIX::setsid() == -1) {
     osh_warn "Couldn't call setsid(), proceeding anyway...";
 }
 
-osh_exit OVH::Bastion::helper(cmd => \@command);
+osh_exit(OVH::Bastion::helper(cmd => \@command));

@@ -59,8 +59,7 @@ $fnret = OVH::Bastion::Plugin::generateEgressKey::preconditions(
 $fnret or HEXIT($fnret);
 
 # get returned untainted values
-my $keyhome;
-($algo, $size, $keyhome) = @{$fnret->value}{qw{ algo size keyhome}};
+($algo, $size) = @{$fnret->value}{qw{ algo size }};
 
 my $passphrase = '';
 if ($encrypted) {
@@ -74,23 +73,22 @@ if ($encrypted) {
 }
 
 my $keykeeper_uid = (getpwnam('keykeeper'))[2];
-my $group_gid     = (getgrnam($group))[2];
 
-if (!$keykeeper_uid || !$group_gid) {
-    warn_syslog("Couldn't get the uid of keykeeper ($keykeeper_uid) or gid of $group ($group_gid) while $self "
+if (!$keykeeper_uid) {
+    warn_syslog("Couldn't get the uid of keykeeper ($keykeeper_uid) while $Self "
           . "is attempting to generate a new key with algo $algo and size $size");
     HEXIT('ERR_INTERNAL', msg => "Couldn't fetch the required account or group IDs");
 }
 
 osh_info "Generating a new key pair, this might take a while...";
 $fnret = OVH::Bastion::generate_ssh_key(
-    folder         => $keyhome,
+    folder         => $Group->keyHome,
     prefix         => $Group->name,
     algo           => $algo,
     size           => $size,
     passphrase     => $passphrase,
     uid            => $keykeeper_uid,
-    gid            => $group_gid,
+    gid            => $Group->gid,
     group_readable => 1,
 );
 $fnret or HEXIT($fnret);

@@ -317,7 +317,7 @@ run()
         printf "%b%b%b\\n" "$WHITE_ON_BLUE" "[INFO] output of the command follows" "$NOC"
         cat "$outdir/$basename.log"
         printf "%b%b%b\\n" "$WHITE_ON_BLUE" "[INFO] returned json follows" "$NOC"
-        grep "^JSON_OUTPUT=" -- $outdir/$basename.log | cut -d= -f2- | jq --sort-keys .
+        grep "^JSON_OUTPUT=" -- $outdir/$basename-nodebug.log | cut -d= -f2- | jq --sort-keys .
         printf "%b%b%b\\n" "$WHITE_ON_BLUE" "[INFO] consistency check follows" "$NOC"
         cat "$outdir/$basename.cc"
         if test -t 0 && [ "$opt_no_pause_on_fail" != 1 ]; then
@@ -342,7 +342,7 @@ run()
         cp "$1" "$outdir/$basename.script"
     fi
 
-    printf '%b %b*** [%04d/%04d] %b::%b %b(%b)%b\n' "$(prefix)" "$BOLD_CYAN" "$testno" "$testcount" "$name" "$case" "$NOC$DARKGRAY" "$*" "$NOC"
+    printf '%b %b*** [%04d/%04d] %b::%b %b(%b)%b\n' "$(prefix)" "$CYAN_ON_BLACK" "$testno" "$testcount" "$name" "$case" "$NOC$DARKGRAY" "$*" "$NOC"
 
     # special case for scp: we need to wait a bit before terminating the test
     sleepafter=0
@@ -354,9 +354,12 @@ run()
     flock "$outdir/$basename.retval" $screen "$outdir/$basename.log" -D -m -fn -ln bash -c "$* ; echo \$? > $outdir/$basename.retval ; sleep $sleepafter"
     flock "$outdir/$basename.retval" true
 
+    # remove debug lines for our greps
+    grep -vF 'DBG:' "$outdir/$basename.log" > "$outdir/$basename-nodebug.log"
+
     # look for generally bad strings in the output
     # shellcheck disable=SC2126,SC2143
-    if [ -n "$(grep -qE "$_bad" $outdir/$basename.log | grep -Ev "$_badexclude")" ]; then
+    if [ -n "$(grep -E "$_bad" "$outdir/$basename-nodebug.log" | grep -Ev "$_badexclude")" ]; then
         nbfailedgeneric=$(( nbfailedgeneric + 1 ))
         fail "BAD STRING" "(generic known-bad string found in output)"
     fi
@@ -440,13 +443,13 @@ ignorecodewarn()
 get_json()
 {
     [ "$COUNTONLY" = 1 ] && return
-    grep "^JSON_OUTPUT=" -- $outdir/$basename.log | tail -n1 | cut -d= -f2-
+    grep "^JSON_OUTPUT=" -- $outdir/$basename-nodebug.log | tail -n1 | cut -d= -f2-
 }
 
 get_stdout()
 {
     [ "$COUNTONLY" = 1 ] && return
-    cat $outdir/$basename.log
+    cat $outdir/$basename-nodebug.log
 }
 
 json()
@@ -529,7 +532,7 @@ contain()
         specialoption='-E'
         shift
     fi
-    if grep -q $specialoption -- "$1" "$outdir/$basename.log"; then
+    if grep -Fv 'DBG:' "$outdir/$basename-nodebug.log" | grep -q $specialoption -- "$1"; then
         ok "MUST CONTAIN" "($1)"
     else
         nbfailedgrep=$(( nbfailedgrep + 1 ))
@@ -541,7 +544,7 @@ nocontain()
 {
     [ "$COUNTONLY" = 1 ] && return
     grepit="$1"
-    if grep -Eq "$grepit" "$outdir/$basename.log"; then
+    if grep -Fv 'DBG:' "$outdir/$basename-nodebug.log" | grep -Eq "$grepit"; then
         nbfailedgrep=$(( nbfailedgrep + 1 ))
         fail "MUST NOT CONTAIN" "(should not have found string '$grepit' in output)"
     else

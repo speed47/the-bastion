@@ -281,12 +281,10 @@ if ($nbErrors) {
 OVH::Bastion::syslogFormatted(
     severity => 'info',
     type     => 'account',
-    fields   => [['action', 'delete'], ['account', $Account], ['errors', $nbErrors]]
+    fields   => [['action', 'delete'], ['account', $Account->name], ['errors', $nbErrors]]
 );
 
-HEXIT(
-    'OK',
-    value =>
-      {account => $Account->name, ttygroup => $Account->ttyGroup, operation => 'deleted', errors => $nbErrors + 0},
-    msg => "Account $Account has been deleted"
+HEXIT('OK',
+    value => {account => $Account->name, operation => 'deleted', errors => $nbErrors + 0},
+    msg => "Account $Account has been deleted",
 );

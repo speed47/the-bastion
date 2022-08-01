@@ -100,21 +100,28 @@ elsif ($action eq 'del') {
     # if other remote users are still members: check whether this account was the last one, of if there
     # are others
     my $otherMembers = 0;
-    if ($Account->type eq 'realm') {
-        $fnret = $Account->getRemoteAccounts;
+    if ($Account->type eq 'remote') {
+        osh_debug("First need to verify there are no other remote accounts as we're a remote account");
+        my $RealmSupportAccount = $Account->getRealmSupportAccount();
+        $RealmSupportAccount or HEXIT($RealmSupportAccount);
+
+        $fnret = $RealmSupportAccount->getRemoteAccounts;
         $fnret or HEXIT($fnret);
 
         foreach my $RemoteAccount (@{$fnret->value}) {
-            next if ($RemoteAccount->remoteName eq $Account->remoteName);
+            osh_debug("... remote account: $RemoteAccount");
+            next if ($RemoteAccount->remoteName eq $Account->remoteName); # this is us
             if ($Group->hasMemberOrGuest($RemoteAccount)) {
+                # this is somebody else: ok, we are not alone
+                osh_debug("... found one that isn't us, won't delete from the sysgroup");
                 $otherMembers++;
                 last;
             }
         }
     }
     if (!$otherMembers) {
-        $fnret =
-          OVH::Bastion::sys_delmemberfromgroup(group => $roleSysGroup, user => $Account->sysUser, noisy_stderr => 1);
+        $fnret = OVH::Bastion::sys_delmemberfromgroup(group => $roleSysGroup, user => $Account->sysUser,
+            noisy_stderr => 1);
     }
 }
 else {

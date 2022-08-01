@@ -79,7 +79,6 @@ $Group or HEXIT($Group);
 
 HEXIT('ERR_GROUP_ALREADY_EXISTS', msg => "The group '$group' already exits") if $Group->isExisting;
 
-# FIXME MIGRA replace by $Group->canBeCreated();
 foreach my $test ($Group->sysGroup, $Group->sysGroupAclkeeper, $Group->sysGroupGatekeeper, $Group->sysGroupOwner) {
     $fnret = OVH::Bastion::sys_getgr_name(name => $test);
     $fnret and HEXIT('KO_ALREADY_EXISTING', msg => "The group $Group already exists");
@@ -156,7 +155,7 @@ if ($fnret->err ne 'OK') {
         msg => "Error while adding corresponding user of group $Group ($fnret)");
 }
 
-# Building /home/$group
+# Building /home/$sysGroup
 OVH::Bastion::touch_file($Group->allowedIpFile);
 
 $group = $Group->sysGroup;
@@ -173,28 +172,34 @@ foreach my $command (
     $fnret->err eq 'OK'
       or HEXIT('ERR_CHMOD_FAILED', msg => "Error while running chmod to adjust permissions (" . $fnret->msg . ")");
 }
-chmod 0751, "/home/$group" if !OVH::Bastion::has_acls();
+chmod 0751, $Group->home if !OVH::Bastion::has_acls();
 
-foreach my $gr ("$group-owner", "$group-gatekeeper", "$group-aclkeeper", "osh-whoHasAccessTo", "osh-auditor",
-    "osh-superowner")
+foreach my $gr ($Group->sysGroupOwner, $Group->sysGroupGatekeeper, $Group->sysGroupAclkeeper,
+    "osh-whoHasAccessTo", "osh-auditor", "osh-superowner")
 {
-    OVH::Bastion::sys_setfacl(target => "/home/$group", perms => "g:$gr:x")
+    OVH::Bastion::sys_setfacl(target => $Group->home, perms => "g:$gr:x")
       or HEXIT('ERR_SETFACL_FAILED', msg => "Error setting ACLs on group homedir");
 }
 
-my $keykeeper_uid = (getpwnam('keykeeper'))[2];
-my $group_gid     = (getgrnam($group))[2];
-chown $keykeeper_uid, $group_gid, "/home/keykeeper/$group";
+# refresh the group, so that ->isExisting() succeeds, and that ->gid has a value
+$Group->refresh();
 
-osh_debug("Adding allowkeeper to group $group");
-$fnret = OVH::Bastion::sys_addmembertogroup(group => $group, user => 'allowkeeper');
+
+my $keykeeper_uid = (getpwnam('keykeeper'))[2];
+if (!chown $keykeeper_uid, $Group->gid, $Group->keyHome) {
+    osh_warn("Couldn't chown the key directory ($!), will continue anyway...");
+}
+
+
+osh_debug("Adding allowkeeper to group $Group");
+$fnret = OVH::Bastion::sys_addmembertogroup(group => $Group->sysGroup, user => 'allowkeeper');
 $fnret or HEXIT($fnret);
 
 osh_info("Adding $owner to proper system groups of $Group...");
 
 # temporarily set ourselves owner manually so that we can add the wanted owner properly
 # as owner/gatekeeper/member then revoke our own right
-$fnret = OVH::Bastion::sys_addmembertogroup(group => "$group-owner", user => $self, noisy_stderr => 1);
+$fnret = OVH::Bastion::sys_addmembertogroup(group => $Group->sysGroupOwner, user => $self, noisy_stderr => 1);
 $fnret or HEXIT($fnret);
 
 # special case: if we're setting ourselves as owner, we must not remove
@@ -222,7 +227,7 @@ foreach my $todo (@todoList) {
     $fnret = OVH::Bastion::Plugin::groupSetRole::act(
         Self           => $Self,
         account        => $todo->{'account'},
-        group          => $Group->name,
+        Group          => $Group,
         action         => $todo->{'action'},
         role           => $todo->{'role'},
         silentoverride => 1
@@ -235,12 +240,12 @@ if (!$no_key) {
 
     $fnret = OVH::Bastion::generate_ssh_key(
         prefix         => $Group->name,
-        folder         => "/home/keykeeper/$group",
+        folder         => $Group->keyHome,
         size           => $size,
         algo           => $algo,
         passphrase     => $passphrase,
         uid            => $keykeeper_uid,
-        gid            => $group_gid,
+        gid            => $Group->gid,
         group_readable => 1
     );
     $fnret or HEXIT($fnret);
@@ -249,7 +254,7 @@ if (!$no_key) {
 # allowed to sudo for the group
 osh_info("Configuring sudoers for this group");
 $fnret = OVH::Bastion::execute(
-    cmd          => [$OVH::Bastion::BASEPATH . '/bin/sudogen/generate-sudoers.sh', 'create', 'group', $group],
+    cmd          => [$OVH::Bastion::BASEPATH . '/bin/sudogen/generate-sudoers.sh', 'create', 'group', $Group->sysGroup],
     must_succeed => 1,
     noisy_stdout => 1
 );

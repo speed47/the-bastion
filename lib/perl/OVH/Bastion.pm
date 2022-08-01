@@ -6,6 +6,7 @@ use Fcntl;
 use POSIX qw(strftime);
 use List::Util qw{ any };
 use Hash::Util qw{ unlock_hashref_recurse };
+use Term::ANSIColor;
 
 use File::Basename;
 use lib dirname(__FILE__) . '/..';
@@ -149,7 +150,7 @@ my %_autoload_files = (
           is_access_granted
           is_access_way_granted
           print_acls
-          ssh_test_access_way
+          ssh_test_access_to
           }
     ],
     allowkeeper => [
@@ -334,6 +335,13 @@ sub json_output {    ## no critic (ArgUnpacking)
     # rename forbidden strings
     $encoded_json =~ s/JSON_(START|OUTPUT|END)/JSON__$1/g;
 
+    # if we're in debug mode, sleep a tiny bit before printing our JSON, as debug
+    # is very verbose, and several different processes could be writing to the same
+    # stdout than us, we don't want it to be mangled.
+    if ($ENV{'OSH_DEBUG'}) {
+        select(undef, undef, undef, 0.1);
+    }
+
     if ($no_delimiters) {
         print $encoded_json;
     }
@@ -451,16 +459,13 @@ sub osh_ok {    ## no critic (ArgUnpacking)
 }
 
 sub osh_debug {
-    my $text = shift;
-    if ($ENV{'OSH_DEBUG'} && !$ENV{'PLUGIN_QUIET'}) {
-        foreach my $line (split /^/, $text) {
-            chomp $line;
-            my $exename = $0;
-            $exename =~ s{.*/}{};
-            print STDERR colored("DBG:$exename\[$$\] $line", 'bold black') . "\n";
-        }
-    }
-    return;
+    return 1 if (!$ENV{'OSH_DEBUG'} || $ENV{'PLUGIN_QUIET'});
+    my $msg = shift;
+
+    my $exename = $0;
+    $exename =~ s{.*/}{};
+    print STDERR colored(sprintf("DBG:%s\[%d\] %s: %s %s\n",
+        $exename, $$, (caller(1))[3]||'(main)', $msg, OVH::Bastion::call_stack(2)), 'bold black');
 }
 
 sub osh_info {
@@ -852,13 +857,6 @@ sub build_ttyrec_cmdline_part1of2 {
 
     my $Account = $params{'Account'};
 
-    if ($Account) {
-        $params{'account'}       = $Account->name;          # FIXME TMP MIGRA
-        $params{'remoteaccount'} = $Account->remoteName;    # FIXME TMP MIGRA
-        $params{'realm'}         = $Account->realm;         # FIXME TMP MIGRA
-        $params{'home'}          = $Account->home;
-    }
-
     # build ttyrec filename format
     my $bastionName          = OVH::Bastion::config('bastionName')->value;
     my $ttyrecFilenameFormat = OVH::Bastion::config('ttyrecFilenameFormat')->value;
@@ -870,7 +868,6 @@ sub build_ttyrec_cmdline_part1of2 {
     $ttyrecFilenameFormat =~ s/&account/$params{'account'}/g if $params{'account'};
 
     if ($ttyrecFilenameFormat =~ /&(bastionname|uniqid|ip|port|user|account)/) {
-
         # if we still have a placeholder here, then we were missing parameters
         return R('ERR_MISSING_PARAMETER',
             msg => "Missing bastionname, uniqid, ip, port, user or account in ttyrec cmdline building");
@@ -880,10 +877,10 @@ sub build_ttyrec_cmdline_part1of2 {
     $ttyrecFilenameFormat =~ tr{/}{_};
 
     # preprend (and create) directory
-    my $saveDir = $params{'home'} . "/ttyrec";
+    my $saveDir = $Account->home . "/ttyrec";
     mkdir($saveDir);
-    if ($params{'realm'} && $params{'remoteaccount'}) {
-        $saveDir .= "/" . $params{'remoteaccount'};
+    if ($Account->remoteName) {
+        $saveDir .= "/" . $Account->remoteName;
         mkdir($saveDir);
     }
     $saveDir .= "/" . $params{'ip'};
@@ -906,7 +903,7 @@ sub build_ttyrec_cmdline_part1of2 {
     push @ttyrec, '-T', 'always' if $params{'tty'};
     push @ttyrec, '-T', 'never'  if $params{'notty'};
 
-    my $fnret = $params{'Account'}->getConfig("public/idle_ignore");
+    my $fnret = $Account->getConfig("public/idle_ignore");
     if ($fnret && $fnret->value =~ /yes/) {
         osh_debug("Account is immune to idle, not adding ttyrec commandline parameters");
         return R('OK', value => {saveFile => $saveFile, cmd => \@ttyrec, idleIgnore => 1});
@@ -1039,7 +1036,7 @@ sub call_stack {
         $callerStack .= " < $func" if $func !~ m{^Memoize};
         $i++;
     }
-    return sprintf("func '%s' by '%s[%d]'", $callerStack, $0, $$);
+    return $callerStack ? sprintf("(by %s)", $callerStack) : '';
 }
 
 sub check_args {
@@ -1079,13 +1076,13 @@ sub check_args {
     my $callerStack = OVH::Bastion::call_stack(1);
     warn_syslog(
         sprintf(
-            "check_args: mandatory parameters '@errorMissing' missing in call to %s",
-            $callerStack
+            "check_args: mandatory parameters '@errorMissing' missing in call to %s by %s",
+            $callerStack, $0
         )
     ) if @errorMissing;
-    warn_syslog(sprintf("check_args: unknown parameters '@errorUnknown' in call to %s", $callerStack))
+    warn_syslog(sprintf("check_args: unknown parameters '@errorUnknown' in call to %s by %s", $callerStack, $0))
       if @errorUnknown;
-    warn_syslog(sprintf("check_args: false value for parameters '@errorFalse' in call to %s", $callerStack))
+    warn_syslog(sprintf("check_args: false value for parameters '@errorFalse' in call to %s by %s", $callerStack, $0))
       if @errorFalse;
 
     return R('ERR_MISSING_ARGUMENT', msg => "Missing arguments: @errorMissing") if @errorMissing;

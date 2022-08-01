@@ -13,17 +13,20 @@ sub preconditions {
     my $fnret = OVH::Bastion::check_args(
         \%p,
         mandatory       => [qw{ Self size context }],
-        optionalFalseOk => [qw{ group account Account sudo }],    # MIGRA FIXME object
+        optionalFalseOk => [qw{ Group account Account sudo }],
     );
     $fnret or return $fnret;
 
     my ($Group, $passhome, $base, $Account);
 
     if ($p{'context'} eq 'group') {
-        if (not $p{'group'}) {
+        if (!$p{'Group'}) {
             return R('ERR_MISSING_PARAMETER', msg => "Missing argument 'group'");
         }
-        $Group = OVH::Bastion::Group->newFromName($p{'group'}, check => 1);
+        $Group = $p{'Group'};
+        $fnret = $Group->check();
+        $fnret or return $fnret;
+
         $passhome   = $Group->passwordHome;
         $base       = $Group->passwordFile;
     }
@@ -187,8 +190,8 @@ sub act {
         'OK',
         value => {
             context => $context,
-            Group   => $Group,
-            Account => $Account,
+            group   => ($Group?$Group->name:undef),
+            account => ($Account?$Account->name:undef),
             hashes  => $hashes
         }
     );

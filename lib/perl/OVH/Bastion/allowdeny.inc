@@ -827,17 +827,17 @@ sub is_access_granted {
     return R('KO_ACCESS_DENIED', msg => "Access denied for $account to $machine");
 }
 
-sub ssh_test_access_way {
-    my %params  = @_;
-    my $account = $params{'account'};
-    my $group   = $params{'group'};
+sub ssh_test_access_to { # FIXME MIGRA move to objects
+    my %p  = @_;
+    my $Account = $p{'Account'};
+    my $Group   = $p{'Group'};
 
-    my $port = $params{'port'};
-    my $ip   = $params{'ip'};
-    my $user = $params{'user'};
+    my $port = $p{'port'};
+    my $ip   = $p{'ip'};
+    my $user = $p{'user'};
     my $fnret;
 
-    if (defined $account and defined $group) {
+    if ($p{'Account'} && $p{'Group'}) {
         return R('ERR_INCOMPATIBLE_PARAMETERS');
     }
 
@@ -855,28 +855,20 @@ sub ssh_test_access_way {
     }
 
     $user = OVH::Bastion::config("defaultLogin")->value if not $user;
-    $user = $account                                    if not $user;    # defaultLogin empty means the user himself
+    $user = $Account->sysUser                           if not $user;    # defaultLogin empty means the user himself
     $user = OVH::Bastion::get_user_from_env()->value    if not $user;    # no user or account ? get from env then
     $fnret = OVH::Bastion::is_valid_remote_user(user => $user);
     $fnret or return $fnret;
     $user = $fnret->value;
 
-    my $Account;
-    my $Group;
-    if ($group) {
-        $Group = OVH::Bastion::Group->newFromName($group, check => 1);
-        $Group or return $Group;
-
-        $fnret = $Group->getKeys();
+    if ($p{'Group'}) {
+        $fnret = $p{'Group'}->getKeys();
     }
-    elsif ($account) {
-        $Account = OVH::Bastion::Account->newFromName($account, check => 1);
-        $Account or return $Account;
-
-        $fnret = $Account->getPersonalKeys();
+    elsif ($p{'Account'}) {
+        $fnret = $p{'Account'}->getPersonalKeys();
     }
     else {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing 'group' or 'account' for ssh_test_access_way");
+        return R('ERR_MISSING_PARAMETER', msg => "Missing 'Group' or 'Account' for ssh_test_access_to");
     }
     $fnret or return $fnret;
 

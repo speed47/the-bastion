@@ -1,6 +1,8 @@
 package OVH::Bastion::Key;
+# vim: set filetype=perl ts=4 sw=4 sts=4 et:
 use common::sense;
 
+use Hash::Util qw{ lock_hashref_recurse };
 use Memoize;
 use Scalar::Util qw{ refaddr };
 use Digest::MD5;
@@ -9,9 +11,9 @@ use OVH::Bastion;
 use OVH::Result;
 
 use overload (
-    '""' => 'name',
-    'eq' => '_eq',
-    'ne' => '_ne',
+    '""' => 'id',
+    'eq' => 'equals',
+    'ne' => 'notEquals',
 );
 
 =cut
@@ -77,12 +79,84 @@ sub newFromFile {
     return __PACKAGE__->newFromKeyLine($line, %p);
 }
 
+sub newFromKeygen {
+    my ($this, %p) = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ folder prefix algo size way }],
+        optional => [qw{ uid gid name }],
+        optionalFalseOk => [qw{ passphrase group_readable }],
+    );
+
+    # FIXME check for algo & size BEFORE generating the key, we'll need the $way also for this
+
+    my ($folder, $prefix) = ($p{'folder'},$p{'prefix'});
+    if (!-d $folder) {
+        return R('ERR_DIRECTORY_NOT_FOUND', msg => "Specified directory not found ($folder)");
+    }
+
+    if (!-w $folder) {
+        return R('ERR_DIRECTORY_NOT_WRITABLE', msg => "Specified directory can't be written to ($folder)");
+    }
+
+    if ($prefix =~ /^([A-Za-z0-9_.-]{1,64})$/) {
+        $prefix = $1; # untaint
+    }
+    else {
+        return R('ERR_INVALID_PARAMETER', msg => "Specified prefix is invalid ($prefix)");
+    }
+
+    if (($p{'uid'} || $p{'gid'}) && $< != 0) {
+        return R('ERR_INVALID_PARAMETER', msg => "Can't specify uid or gid when not root");
+    }
+
+    $fnret = OVH::Bastion::is_allowed_algo_and_size(algo => $p{'algo'}, size => $p{'size'}, way => 'egress');
+    $fnret or return $fnret;
+
+    # Forge key
+    $p{'passphrase'} = '' if not $p{'passphrase'};
+    $p{'size'}       = '' if $p{'algo'} eq 'ed25519';
+    my $name = $p{'name'} || $prefix;
+    my $sshKeyName = $folder . '/id_' . $p{'algo'} . $p{'size'} . '_' . $prefix . '.' . time();
+
+    if (-e $sshKeyName) {
+        return R('ERR_KEY_ALREADY_EXISTS', msg => "Can't forge key, generated name already exists");
+    }
+
+    my $bastionName = OVH::Bastion::config('bastionName')->value;
+
+    my @command = ('ssh-keygen');
+    push @command, '-t', $p{'algo'};
+    push @command, '-b', $p{'size'} if $p{'size'};
+    push @command, '-N', $p{'passphrase'};
+    push @command, '-f', $sshKeyName;
+    push @command, '-C', sprintf('%s@%s:%s', $name, $bastionName, scalar(time));
+
+    $fnret = OVH::Bastion::execute(cmd => \@command, noisy_stderr => 1);
+    $fnret->err eq 'OK'
+      or return R('ERR_SSH_KEYGEN_FAILED', msg => "Error while generating group key ($fnret)");
+
+    my %files = (
+        $sshKeyName          => ($p{'group_readable'} ? oct(440) : oct(400)),
+        $sshKeyName . '.pub' => oct(444),
+    );
+    while (my ($file, $chmod) = each(%files)) {
+        if (not -e $file) {
+            return R('ERR_SSH_KEYGEN_FAILED', msg => "Couldn't find generated key ($file)");
+        }
+        chown $p{'uid'}, -1, $file if $p{'uid'};
+        chown -1, $p{'gid'}, $file if $p{'gid'};
+        chmod $chmod, $file;
+    }
+
+    return __PACKAGE__->newFromFile("$sshKeyName.pub");
+}
+
 sub newFromKeyLine {
     my ($objectType, $line, %p) = @_;
     $p{'line'} = $line;
     my $fnret = OVH::Bastion::check_args(\%p,
         mandatory => [qw{ line }],
-        optionalFalseOk => [qw{ way check date publicFile }],
+        optionalFalseOk => [qw{ way check date publicFile fast }],
     );
     $fnret or return $fnret;
 
@@ -138,7 +212,67 @@ sub newFromKeyLine {
         comment  => $comment,
         id       => $id,
         date     => $p{'date'},
+
+        # only for keys from authorized_keys:
+        info     => undef,
+        isPiv => undef,
+
+        # only filled if !$fast:
+        size => undef,
+        fingerprint => undef,
+        family => undef, # useful vs typecode?
     };
+
+
+    if (not $p{'fast'}) {
+        # put that in a tempfile for ssh-keygen inspection, except if we have the publicFile already
+        my $filename = $p{'publicFile'};
+        if (!$filename || ! -r -f $filename) {
+            my $fh       = File::Temp->new(UNLINK => 1);
+            $filename = $fh->filename;
+            print {$fh} $typecode . " " . $base64;
+            close($fh);
+        }
+
+        # FIXME shall we return on error?
+
+        $fnret = OVH::Bastion::execute(cmd => ['ssh-keygen', '-l', '-f', $filename]);
+        if ($fnret->is_err || !$fnret->value || ($fnret->value->{'sysret'} != 0 && $fnret->value->{'sysret'} != 1)) {
+            # sysret == 1 means ssh-keygen didn't recognize this key, handled below.
+            return R('ERR_SSH_KEYGEN_FAILED',
+                msg => "Couldn't read the fingerprint of $filename ($fnret)");
+        }
+        my $sshkeygen;
+        if ($fnret->err eq 'OK') {
+            $sshkeygen = $fnret->value->{'stdout'}->[0];
+            chomp $sshkeygen;
+        }
+
+# 2048 01:c0:37:5e:b4:bf:00:b6:ef:d3:65:a7:5c:60:b1:81  john@doe (RSA)
+# 521 af:84:cd:70:34:64:ca:51:b2:17:1a:85:3b:53:2e:52  john@doe (ECDSA)
+# 1024 c0:4d:f7:bf:55:1f:95:59:be:7e:50:47:e4:81:c3:6a  john@doe (DSA)
+# 256 SHA256:Yggd7VRRbbivxkdVwrdt0HpqKNylMK91nNIU+RxndTI john@doe (ED25519)
+
+        if (defined $sshkeygen && $sshkeygen =~ /^(\d+)\s+(\S+)\s+(.+)\s+\(([A-Z0-9]+)\)$/) {
+            my ($size, $fingerprint, $comment2, $family) = ($1, $2, $3, $4);
+            $Key->{'size'} = $size + 0;
+            $Key->{'fingerprint'} = $fingerprint;
+            $Key->{'family'}      = $family;
+
+            # check allowed algos and key size
+            my $allowedSshAlgorithms = OVH::Bastion::config("allowed${way}SshAlgorithms");
+            my $minimumRsaKeySize    = OVH::Bastion::config("minimum${way}RsaKeySize");
+            if ($allowedSshAlgorithms && !grep { lc($family) eq $_ } @{$allowedSshAlgorithms->value}) {
+                return R('KO_FORBIDDEN_ALGORITHM');
+            }
+            if ($minimumRsaKeySize && lc($family) eq 'rsa' && $minimumRsaKeySize->value > $size) {
+                return R('KO_KEY_SIZE_TOO_SMALL');
+            }
+        }
+        else {
+            return R('KO_NOT_A_KEY');
+        }
+    }
 
     bless $Key, 'OVH::Bastion::Key';
 
@@ -154,42 +288,13 @@ BEGIN {
     # simple getters, they have no corresponding setter, as Account objects are immutable
     foreach my $attr (qw{
             prefix typecode base64 comment id date
+            info isPiv fingerprint family size
         }) {
         *$attr = sub {
             my $this = shift;
             return $this->{$attr};
         };
     }
-
-=cut
-    # simple getters that make no sense for specific account types, in which case we log a warning
-    # when they're called, and return undef
-    foreach my $attr (qw{ allowedIpFile allowedPrivateFile }) {
-        *$attr = sub {
-            my ($this, %p) = shift;
-            if (none { $this->type eq $_ } qw{ local remote }) {
-                OVH::Bastion::warn_syslog("Attempted to access attribute '$attr' on '$this' "
-                    . "which is of type ".$this->type);
-                return undef;
-            }
-            return $this->{$attr};
-        };
-    }
-
-    # almost-simple getters, they just need to have a completely defined Account, hence
-    # they ensure that ->isExisting has been called first (it is memoized, so only
-    # expensive on the first call)
-    foreach my $attr (qw{ uid gid }) {
-        *$attr = sub {
-            my $this = shift;
-            if (!defined($this->{$attr})) {
-                # check for account's existence and fill $attr if it's the case
-                $this->isExisting();
-            }
-            return $this->{$attr};
-        };
-    }
-=cut
 
     use strict "refs";
 }
@@ -216,19 +321,17 @@ sub from_list {
     return \@fromList;
 }
 
-sub _eq {
+sub equals {
     my ($this, $that) = @_;
     return (ref $this eq ref $that && $this->line eq $that->line);
 }
 
-sub _ne {
+sub notEquals {
     my ($this, $that) = @_;
     return !($this eq $that);
 }
 
 1;
-
-__END__
 
 =cut
 sub check {
@@ -251,12 +354,10 @@ sub check {
             chomp $sshkeygen;
         }
 
-=cut
-2048 01:c0:37:5e:b4:bf:00:b6:ef:d3:65:a7:5c:60:b1:81  john@doe (RSA)
-521 af:84:cd:70:34:64:ca:51:b2:17:1a:85:3b:53:2e:52  john@doe (ECDSA)
-1024 c0:4d:f7:bf:55:1f:95:59:be:7e:50:47:e4:81:c3:6a  john@doe (DSA)
-256 SHA256:Yggd7VRRbbivxkdVwrdt0HpqKNylMK91nNIU+RxndTI john@doe (ED25519)
-=cut
+# 2048 01:c0:37:5e:b4:bf:00:b6:ef:d3:65:a7:5c:60:b1:81  john@doe (RSA)
+# 521 af:84:cd:70:34:64:ca:51:b2:17:1a:85:3b:53:2e:52  john@doe (ECDSA)
+# 1024 c0:4d:f7:bf:55:1f:95:59:be:7e:50:47:e4:81:c3:6a  john@doe (DSA)
+# 256 SHA256:Yggd7VRRbbivxkdVwrdt0HpqKNylMK91nNIU+RxndTI john@doe (ED25519)
 
         if (defined $sshkeygen and $sshkeygen =~ /^(\d+)\s+(\S+)\s+(.+)\s+\(([A-Z0-9]+)\)$/) {
             my ($size, $fingerprint, $comment2, $family) = ($1, $2, $3, $4);
@@ -304,6 +405,107 @@ sub check {
         return R('OK', value => \%return);
     }
     return R('ERR_INTERNAL', value => \%return);
+}
+=cut
+
+sub print {
+    my ($this, %p) = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        optional => [qw{ id }],
+        optionalFalseOk => [qw{ nokeyline err }],
+    );
+
+    require Term::ANSIColor;
+
+    # if id is passed directly, this is a key from an authkeys file, the id is the line number
+    # otherwise, we should have an id within the key, it depends on $key->line, usually this is a key from a .pub file (no line number)
+    my $id = $p{'id'} || $this->id;
+
+    if ($this->info) {
+        my $info = $this->info;
+
+        # parse data from 'info' and print it nicely
+        my ($name) = $info =~ m{NAME="([^"]+)};
+        osh_info(Term::ANSIColor::colored("name: " . $name, 'cyan'));
+
+        my ($by)      = $info =~ m{ADDED_BY=(\S+)};
+        my ($when)    = $info =~ m{DATETIME=(\S+)};
+        my ($version) = $info =~ m{VERSION=(\S+)};
+        my ($session) = $info =~ m{UNIQID=(\S+)};
+        osh_info(
+            Term::ANSIColor::colored(
+                sprintf(
+                    "info: added by %s at %s in session %s running v%s",
+                    $by      || '(?)',
+                    $when    || '(?)',
+                    $session || '(?)',
+                    $version || '(?)'
+                ),
+                'cyan'
+            )
+        );
+    }
+
+    if ($this->isPiv) {
+        osh_info(
+            Term::ANSIColor::colored(
+                "PIV: "
+                  . "TouchPolicy="
+                  . $this->pivInfo->{'Yubikey'}{'TouchPolicy'}
+                  . " PinPolicy="
+                  . $this->pivInfo->{'Yubikey'}{'PinPolicy'}
+                  . " SerialNo="
+                  . $this->pivInfo->{'Yubikey'}{'SerialNumber'}
+                  . " Firmware="
+                  . $this->pivInfo->{'Yubikey'}{'FirmwareVersion'},
+                'magenta'
+            )
+        );
+    }
+
+    osh_info(
+        sprintf(
+            "%s%s (%s-%d) [%s]%s",
+            Term::ANSIColor::colored('fingerprint: ', 'green'),
+            $this->fingerprint || 'INVALID_FINGERPRINT',
+            $this->family      || 'INVALID_FAMILY',
+            $this->size,
+            defined $id ? "ID = $id" : POSIX::strftime("%Y/%m/%d", localtime($this->date)),
+            $p{'err'} eq 'OK' ? '' : ' ***<<' . $p{'err'} . '>>***',
+        )
+    );
+
+    if (!$p{'nokeyline'}) {
+        osh_info(Term::ANSIColor::colored('keyline', 'red') . ' follows, please copy the *whole* line:');
+        print($this->line. "\n");
+    }
+    osh_info(' ');
+    return;
+}
+
+sub TO_JSON {
+    my $this = shift;
+    my $ret = {
+        prefix   => $this->prefix,
+        typecode => $this->typecode,
+        base64   => $this->base64,
+        comment  => $this->comment,
+        id       => $this->id,
+        date     => $this->date,
+
+        # only filled if !$fast:
+        size => $this->size,
+        fingerprint => $this->fingerprint,,
+        family => $this->family,
+    };
+
+    if ($this->info) {
+        # only for keys from authorized_keys:
+        $ret->{'info'} = $this->info,
+        $ret->{'isPiv'} = $this->isPiv,
+    };
+
+    return $ret;
 }
 
 1;

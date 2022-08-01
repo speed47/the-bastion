@@ -94,4 +94,4 @@ $key->{'prefix'} = 'from="' . join(',', @{$fnret->value}) . '"';
 $Key->print();
 #OVH::Bastion::print_public_key(key => $key);
 
-osh_ok({}); # FIXME TOJSON
+osh_ok($Key); # FIXME TOJSON

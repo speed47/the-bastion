@@ -121,8 +121,7 @@ if ($forcePassword) {
 }
 
 if (not $force) {
-    $fnret = OVH::Bastion::ssh_test_access_way(
-        group         => $Group->sysGroup, # FIXME shoiuld be name
+    $fnret = $Group->sshTestAccessTo(
         user          => $user,
         port          => $port,
         ip            => $ip,

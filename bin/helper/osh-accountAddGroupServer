@@ -53,7 +53,7 @@ if (!grep { $p{'action'} eq $_ } qw{ add del }) {
 my $Account = OVH::Bastion::Account->newFromName($p{'account'}, check => 1);
 $Account or HEXIT($Account);
 
-my $Group = OVH::Bastion::Group->newFromName($p{'group'}, check => 1);
+my $Group = OVH::Bastion::Group->newFromSysGroup($p{'group'}, check => 1);
 $Group or HEXIT($Group);
 
 #>CODE

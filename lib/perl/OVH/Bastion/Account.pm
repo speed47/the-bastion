@@ -8,6 +8,7 @@ use Hash::Util qw{ lock_hashref_recurse lock_ref_value unlock_ref_value };
 use List::Util qw{ any none };
 use Memoize;
 use Scalar::Util qw{ refaddr };
+use Term::ANSIColor;
 
 use OVH::Bastion;
 use OVH::Result;
@@ -203,7 +204,7 @@ BEGIN {
 }
 
 # more complicated getter
-_memoizify('allowedGuestFile');
+#_memoizify('allowedGuestFile');
 sub allowedGuestFile {
     my ($this, $Group, %p) = @_;
     $p{'Group'} = $Group;
@@ -756,7 +757,6 @@ sub _new_from_name {
 
     # if both types are allowed, resolve whether it looks like a local or remote account
     # so that the proper tests are done in the rest of the func
-#MIGRA OVH::Bastion::osh_warn("type=$type name=$name caller1=".(caller(1))[3]." and caller2=".(caller(2))[3]." and caller3=".(caller(3))[3]." from $0");
     if ($type eq 'regular') {
         $type = ($name =~ m{/} ? 'remote' : 'local');
     }
@@ -1236,7 +1236,7 @@ sub accessModify {
         # port: if undef, means a port-wildcard access
         optionalFalseOk => [qw{ user port comment forceKey forcePassword ttl }],
         # group: only for way=group or way=groupguest
-        optional => [qw{ group }],
+        optional => [qw{ Group }],
     );
     $fnret or return $fnret;
 
@@ -1259,8 +1259,9 @@ sub generateEgressKey {
 
     require OVH::Bastion::Key;
     my $Key = OVH::Bastion::Key->newFromKeygen(
+        way => 'egress',
         folder => $this->sshHome,
-        filenamePrefix => 'private',
+        prefix => 'private',
         name => $this->sysUser,
         algo       => $p{'algo'},
         size       => $p{'size'},
@@ -1269,20 +1270,32 @@ sub generateEgressKey {
     return $Key;
 }
 
+_memoizify('getRealmSupportAccount');
+# only for remote accounts
+sub getRealmSupportAccount {
+    my $this = shift;
+
+    my $fnret = $this->isExisting();
+    $fnret or return $fnret;
+
+    if ($this->type ne 'remote') {
+        return R('ERR_NOT_REMOTE_ACCOUNT', msg => "Can't get the realm support account for a non-remote account");
+    }
+    return __PACKAGE__->newFromName("realm_".$this->realm, type => "realm");
+}
+
 # only for realm support accounts, we return a list of Accounts (objects)
 # that will all have their name in the format realmName/accountName,
 # and of type==remote
 _memoizify('getRemoteAccounts');
 sub getRemoteAccounts {
-    my ($this,%p)     = @_;
-    my $fnret = OVH::Bastion::check_args(\%p);
-    $fnret or return $fnret;
+    my $this = shift;
 
-    $fnret = $this->isExisting();
+    my $fnret = $this->isExisting();
     $fnret or return $fnret;
 
     if ($this->type ne 'realm') {
-        return R('ERR_NOT_A_REALM_SUPPORT_ACCOUNT', msg => "Can't get the remote accounts list of a non-realm account");
+        return R('ERR_NOT_REALM_SUPPORT_ACCOUNT', msg => "Can't get the remote accounts list for non-realm accounts");
     }
 
     my %accounts;
@@ -1392,6 +1405,23 @@ sub getAllAcls {
         }
     }
     return R('OK', value => \@acls);
+}
+
+sub TO_JSON {
+    my $this = shift;
+    return $this->name;
+}
+
+sub sshTestAccessTo {
+    my %params  = @_;
+    my ($this, %p)     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ ip }],
+        optionalFalseOk => [qw{ port user forceKey forcePassword }], # FIXME force* unused
+    );
+    $fnret or return $fnret;
+
+    return OVH::Bastion::ssh_test_access_to(Account=> $this, ip => $p{'ip'}, port => $p{'port'}, user => $p{'user'});
 }
 
 1;

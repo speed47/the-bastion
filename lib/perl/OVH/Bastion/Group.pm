@@ -50,7 +50,6 @@ sub refresh {
     my $nbdeleted = 0;
     foreach my $key (keys %CACHE) {
         if ($key =~ /^\Q$addr!/) {
-            print "$key\n"; # FIXME MIGRA
             delete $CACHE{$key};
             $nbdeleted++;
         }
@@ -61,12 +60,16 @@ sub refresh {
 }
 
 sub dbg {
-    return 1 if !$ENV{'OSH_DEBUG'};
+    return 1 if (!$ENV{'OSH_DEBUG'} || $ENV{'PLUGIN_QUIET'});
     my ($this, $msg) = @_;
-    return OVH::Bastion::osh_debug(sprintf("%s(%s[0x%x]): %s called by %s",
-        (caller(1))[3], $this->name, refaddr($this), $msg,
-        OVH::Bastion::call_stack(2)
-    ));
+
+    my $exename = $0;
+    $exename =~ s{.*/}{};
+    print STDERR Term::ANSIColor::colored(sprintf("DBG:%s\[%d\] %s(%s[0x%x]): %s called by %s\n",
+        $exename, $$, (caller(1))[3], $this?$this->name:'<u>',
+        $this?refaddr($this):0, $msg, OVH::Bastion::call_stack(2)
+    ), 'bold black');
+    return 1;
 }
 
 sub newFromSysGroup {
@@ -119,6 +122,7 @@ sub newFromName {
     }
 
     if ($name =~ m/^key/i) {
+        dbg(undef, "group name starts with key: $name");
         return R('KO_FORBIDDEN_PREFIX', msg => 'Forbidden prefix in group name');
     }
     if ($name =~ m/(keeper|owner|-tty)$/i) {
@@ -244,12 +248,8 @@ _memoizify('check');
 sub check {
     my ($this, %p) = @_;
 
-    print "MIGRA check\n";
-
     my $fnret = $this->isExisting();
     $fnret or return $fnret;
-
-    print "MIGRA check isexistingok\n";
 
     if (!-d $this->home) {
         return R('KO_INVALID_DIRECTORY', msg => "This group's home directory doesn't exist");
@@ -258,8 +258,6 @@ sub check {
     if (!-d $this->keyHome) {
         return R('KO_INVALID_DIRECTORY', msg => "This group's key directory doesn't exist");
     }
-
-    print "MIGRA check isexistingok reutrnOK\n";
 
     return R('OK');
 }
@@ -621,6 +619,23 @@ sub deleteConfig {
     else {
         return R('ERR_DELETION_FAILED', msg => "Couldn't delete $this config $key: $!");
     }
+}
+
+sub TO_JSON {
+    my $this = shift;
+    return $this->name;
+}
+
+sub sshTestAccessTo {
+    my %params  = @_;
+    my ($this, %p)     = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ ip }],
+        optionalFalseOk => [qw{ port user forceKey forcePassword }], # FIXME force* unused
+    );
+    $fnret or return $fnret;
+
+    return OVH::Bastion::ssh_test_access_to(Group => $this, ip => $p{'ip'}, port => $p{'port'}, user => $p{'user'});
 }
 
 1;

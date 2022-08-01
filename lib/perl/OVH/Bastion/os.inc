@@ -15,8 +15,10 @@ my $_gr_all_cached = 0;
 
 sub sys_clear_cache {
     my $category = shift;
-    OVH::Bastion::osh_warn(
-        "clear_cache $category, got " . (scalar keys %_pw_cache) . " pw and " . (scalar keys %_gr_cache) . " gr");
+    OVH::Bastion::osh_debug("clearing $category, had "
+        . (scalar keys %_pw_cache) . " users and "
+        . (scalar keys %_gr_cache) . " groups"
+    );
 
     # as we're caching functions that usually return OVH::Result objects, and those
     # objects are locked, we get yelled at if we try to empty the cache hashes
@@ -862,19 +864,19 @@ sub sys_getgr_name {
     # if and our $name entry exists in cache, return it
     if (exists $_gr_cache{$name}) {
         if (defined $_gr_cache{$name}) {
-            print "MIGRA getgrname cached $name\n";
+            osh_debug("cached $name");
             return R('OK', value => $_gr_cache{$name});
         }
         else {
             # we cached its non-existence
-            print "MIGRA getgrname negative cached $name\n";
+            osh_debug("cached-negative $name");
             return R('KO_NOT_FOUND', msg => "Group '$name' doesn't exist");
         }
     }
     # cache has been filled but our name entry is not
     # there, it means the group doesn't exist
     elsif ($_gr_all_cached) {
-        print "MIGRA getgrname allcache negative cached $name\n";
+        osh_debug("cached-negative-all $name");
         return R('KO_NOT_FOUND', msg => "Group '$name' doesn't exist");
     }
     # cache has not been filled and our entry doesn't
@@ -892,13 +894,13 @@ sub sys_getgr_name {
             gid     => $fields[2],
             members => [split(/ /, $fields[3])],
         };
-        print "MIGRA getgrname justloaded $name\n";
+        osh_debug("cache miss $name");
         return R('OK', value => $_gr_cache{$fields[0]});
     }
     else {
         # cache the non-existence of this group
         $_gr_cache{$name} = undef;
-        print "MIGRA getgrname justloaded nonex $name\n";
+        osh_debug("negative-cache miss $name");
         return R('KO_NOT_FOUND', msg => "Group '$name' doesn't exist");
     }
 

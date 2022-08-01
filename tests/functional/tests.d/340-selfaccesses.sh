@@ -160,6 +160,9 @@ testsuite_selfaccesses()
     contain "$randomstr"
 
     # scp
+    # remove debug, scp doesn't like that
+    configset debug false
+
     success forscp $a0 --osh selfAddPersonalAccess --host 127.0.0.2 --scpup --port 22
 
     success scp $a0 --osh scp
@@ -200,6 +203,8 @@ testsuite_selfaccesses()
     success forscpremove1 $a0 --osh selfDelPersonalAccess --host 127.0.0.2 --scpup   --port 22
     success forscpremove2 $a0 --osh selfDelPersonalAccess --host 127.0.0.2 --scpdown --port 22
 
+    # put debug back
+    configset debug true
     # /scp
 
     # (forced commands)

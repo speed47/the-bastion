@@ -42,7 +42,7 @@ if (!$group || !$id) {
 #<HEADER
 
 #>PARAMS:GROUP
-my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+my $Group = OVH::Bastion::Group->newFromSysGroup($group, check => 1);
 $Group or HEXIT($Group);
 #<PARAMS:GROUP
 

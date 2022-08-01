@@ -44,6 +44,11 @@ EOF
     return 0;
 }
 
+if (!$group) {
+    help();
+    osh_exit(R('ERR_MISSING_PARAMETER', msg => "Missing mandatory parameter 'group'"));
+}
+
 my $Group = OVH::Bastion::Group->newFromName($group);
 $Group or osh_exit($Group);
 
@@ -71,7 +76,7 @@ if ($encrypted) {
 
 my @command = qw{ sudo -n -u root -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupGenerateEgressKey';
-push @command, '--group', $Group->name;
+push @command, '--group', $Group->sysUser;
 push @command, '--algo', $algo;
 push @command, '--size', $size;
 push @command, '--encrypted' if $encrypted;

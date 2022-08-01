@@ -442,7 +442,7 @@ sub access_modify {
         $ret = $_access_modify_file->(%p, file => $Group->allowedIpFile);
     }
     elsif ($way eq 'groupguest') {
-        $ret = $_access_modify_file->(%p, file => $Account->guestAllowedFile($Group));
+        $ret = $_access_modify_file->(%p, file => $Account->allowedGuestFile($Group));
     }
     osh_debug("_access_modify_file() said $ret");
     return $ret if defined $ret;
