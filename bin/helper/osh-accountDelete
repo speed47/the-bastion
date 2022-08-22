@@ -278,7 +278,7 @@ if ($nbErrors) {
           . ")");
 }
 
-OVH::Bastion::syslogFormatted(
+OVH::Bastion::syslog_formatted(
     severity => 'info',
     type     => 'account',
     fields   => [['action', 'delete'], ['account', $Account->name], ['errors', $nbErrors]]

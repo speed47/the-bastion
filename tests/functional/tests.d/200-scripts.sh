@@ -95,8 +95,7 @@ testsuite_scripts()
     nocontain "ERROR:"
     nocontain "Unexpected termination"
 
-    # create and account and connect one to have a ttyrec file
-
+    # create and account and connect once to have a ttyrec file
     grant accountCreate
 
     success a0_create_a1 $a0 --osh accountCreate --always-active --account $account1 --uid $uid1 --public-key "\"$(cat $account1key1file.pub)\""

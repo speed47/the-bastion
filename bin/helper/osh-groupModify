@@ -49,7 +49,7 @@ if (!$mfaRequired && !defined $ttl && !defined $idleLockTimeout && !defined $idl
 
 #<HEADER
 
-my $Group = OVH::Bastion::Group->newFromName($group, check => 1);
+my $Group = OVH::Bastion::Group->newFromSysGroup($group, check => 1);
 $Group or HEXIT($Group);
 
 if ($Self->isLocalRoot) {
@@ -144,7 +144,7 @@ if (defined $ttl) {
         }
     }
     else {
-        $fnret = $Group->deleteConfig("private/guest_ttl_limit");
+        $fnret = $Group->deleteConfig("guest_ttl_limit");
         if ($fnret) {
             osh_info "... done, guest accesses no longer need to have a TTL set";
         }

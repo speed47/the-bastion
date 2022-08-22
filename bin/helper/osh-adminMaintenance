@@ -93,7 +93,7 @@ elsif ($action eq 'unset') {
     $retmsg = "Maintenance mode is now disabled, new connections are allowed.";
 }
 
-OVH::Bastion::syslogFormatted(
+OVH::Bastion::syslog_formatted(
     severity => 'info',
     type     => 'maintenance',
     fields   => [['action', $action], ['message', $message],]

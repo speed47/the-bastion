@@ -228,7 +228,7 @@ if (!$fnret) {
     $nbErrors++;
 }
 
-OVH::Bastion::syslogFormatted(
+OVH::Bastion::syslog_formatted(
     severity => 'info',
     type     => 'group',
     fields   => [['action', 'delete'], ['group', $Group->name], ['errors', $nbErrors]]

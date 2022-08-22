@@ -411,7 +411,7 @@ sub access_modify {
                 }
             }
         }
-        OVH::Bastion::syslogFormatted(
+        OVH::Bastion::syslog_formatted(
             severity => 'info',
             type     => 'acl',
             fields   => [
@@ -464,7 +464,7 @@ sub get_group_list {
 
     my %groups;
     foreach my $name (keys %{$fnret->value}) {
-        my $Group = OVH::Bastion::Group->newFromName($name);
+        my $Group = OVH::Bastion::Group->newFromSysGroup($name);
         next if !$Group;
 
         if ($p{'fast'}) {

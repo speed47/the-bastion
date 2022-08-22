@@ -75,7 +75,6 @@ sub main_exit {
         ipfrom      => $ipfrom,
         hostfrom    => $hostfrom,
         portfrom    => $portfrom,
-        bastionhost => $bastionhost,
         bastionip   => $bastionip,
         bastionport => $bastionport,
         ipto        => undef,
@@ -478,7 +477,6 @@ if ($interactive and not $ENV{'OSH_IN_INTERACTIVE_SESSION'}) {
         ipfrom      => $ipfrom,
         hostfrom    => $hostfrom,
         portfrom    => $portfrom,
-        bastionhost => $bastionhost,
         bastionip   => $bastionip,
         bastionport => $bastionport,
         ipto        => undef,
@@ -770,7 +768,6 @@ if ($sshAs) {
         ipfrom      => $ipfrom,
         hostfrom    => $hostfrom,
         portfrom    => $portfrom,
-        bastionhost => $bastionhost,
         bastionip   => $bastionip,
         bastionport => $bastionport,
         ipto        => $ip,
@@ -812,7 +809,7 @@ if ($sshAs) {
 
     push @cmd, join(" ", @forwardOptions);
 
-    OVH::Bastion::syslogFormatted(
+    OVH::Bastion::syslog_formatted(
         criticity => 'info',
         type      => 'security',
         fields    => [
@@ -880,7 +877,6 @@ if ($osh_command) {
         ipfrom      => $ipfrom,
         hostfrom    => $hostfrom,
         portfrom    => $portfrom,
-        bastionhost => $bastionhost,
         bastionip   => $bastionip,
         bastionport => $bastionport,
         ipto        => $ip,
@@ -1119,7 +1115,6 @@ if (!$fnret) {
         ipfrom      => $ipfrom,
         hostfrom    => $hostfrom,
         portfrom    => $portfrom,
-        bastionhost => $bastionhost,
         bastionip   => $bastionip,
         bastionport => $bastionport,
         ipto        => $ip,
@@ -1501,7 +1496,6 @@ my $logret = OVH::Bastion::log_access_insert(
     ipfrom      => $ipfrom,
     hostfrom    => $hostfrom,
     portfrom    => $portfrom,
-    bastionhost => $bastionhost,
     bastionip   => $bastionip,
     bastionport => $bastionport,
     ipto        => $ip,

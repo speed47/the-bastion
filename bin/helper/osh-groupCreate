@@ -260,7 +260,7 @@ $fnret = OVH::Bastion::execute(
 );
 $fnret or HEXIT('ERR_CANNOT_CREATE_SUDOERS', msg => "An error occurred while creating sudoers for this group");
 
-OVH::Bastion::syslogFormatted(
+OVH::Bastion::syslog_formatted(
     severity => 'info',
     type     => 'group',
     fields   => [

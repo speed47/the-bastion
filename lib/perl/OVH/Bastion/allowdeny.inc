@@ -828,14 +828,17 @@ sub is_access_granted {
 }
 
 sub ssh_test_access_to { # FIXME MIGRA move to objects
-    my %p  = @_;
-    my $Account = $p{'Account'};
-    my $Group   = $p{'Group'};
+    my %p = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ ip }],
+        optional => [qw{ Account Group }],
+        optionalFalseOk => [qw{ user port }],
+    );
+    $fnret or return $fnret;
 
     my $port = $p{'port'};
     my $ip   = $p{'ip'};
     my $user = $p{'user'};
-    my $fnret;
 
     if ($p{'Account'} && $p{'Group'}) {
         return R('ERR_INCOMPATIBLE_PARAMETERS');
@@ -854,9 +857,9 @@ sub ssh_test_access_to { # FIXME MIGRA move to objects
         $port = $fnret->value;
     }
 
-    $user = OVH::Bastion::config("defaultLogin")->value if not $user;
-    $user = $Account->sysUser                           if not $user;    # defaultLogin empty means the user himself
-    $user = OVH::Bastion::get_user_from_env()->value    if not $user;    # no user or account ? get from env then
+    $user = OVH::Bastion::config("defaultLogin")->value if !$user;
+    $user = $p{'Account'}->sysUser                           if !$user && $p{'Account'}; # defaultLogin empty means the user himself
+    $user = OVH::Bastion::get_user_from_env()->value    if !$user;    # no user or account? get from env then
     $fnret = OVH::Bastion::is_valid_remote_user(user => $user);
     $fnret or return $fnret;
     $user = $fnret->value;
@@ -877,7 +880,13 @@ sub ssh_test_access_to { # FIXME MIGRA move to objects
         my $key     = $fnret->value->{'keys'}{$keyfile};
         my $privkey = $key->{'fullpath'};
         $privkey =~ s/\.pub$//;
-        push @keyList, $privkey if -r $privkey;
+        if (-r $privkey) {
+            osh_debug("considering key $privkey");
+            push @keyList, $privkey;
+        }
+        else {
+            osh_debug("key is not readable, skipping $privkey");
+        }
     }
 
     if (not @keyList) {

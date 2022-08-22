@@ -118,7 +118,7 @@ if ($step == 1) {
             HEXIT($fnret);
         }
         else {
-            $fnret = OVH::Bastion::syslogFormatted(
+            $fnret = OVH::Bastion::syslog_formatted(
                 severity => 'info',
                 type     => 'account',
                 fields   => [
@@ -140,7 +140,7 @@ if ($step == 1) {
             }
             else {
                 my $human = OVH::Bastion::duration2human(seconds => ($currentGrace - time()))->value;
-                $fnret = OVH::Bastion::syslogFormatted(
+                $fnret = OVH::Bastion::syslog_formatted(
                     severity => 'info',
                     type     => 'account',
                     fields   => [
@@ -165,7 +165,7 @@ if ($step == 1) {
             HEXIT($fnret);
         }
         my $human = OVH::Bastion::duration2human(seconds => $ttl)->value;
-        $fnret = OVH::Bastion::syslogFormatted(
+        $fnret = OVH::Bastion::syslog_formatted(
             severity => 'info',
             type     => 'account',
             fields   => [

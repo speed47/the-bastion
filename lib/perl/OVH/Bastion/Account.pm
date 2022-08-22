@@ -916,38 +916,19 @@ sub getGroups {
     $fnret = $this->isExisting();
     $fnret or return $fnret;
 
-    # we loop through all the system groups to find the ones having user
-    # as a member (here, member of the group just means member of the system
-    # group, this translate as either "member" or "guest" of the bastion group).
-    # for the key* groups, member means aclkeeper, gatekeeper or owner of the
-    # corresponding bastion group
-    $fnret = OVH::Bastion::sys_getgr_all();
+    # first, get a list of all the bastion groups
+    $fnret = OVH::Bastion::get_group_list(fast => 1);
     $fnret or return $fnret;
+    my %groups = %{ $fnret->value || {} };
+
+    # if no roles specified, return all of them
+    my $roles = $p{'roles'} || [qw{ guest member owner aclkeeper gatekeeper }];
 
     my %result;
-    foreach my $sysgroup (keys %{$fnret->value}) {
-        # we must be a member of this sysgroup
-        next if (none { $this->sysUser eq $_ } @{ $fnret->value->{$sysgroup}->{'members'} });
-
-        ## no critic(RegularExpressions::ProhibitUnusedCapture) # false positive
-        if ($sysgroup =~ /^key(?<groupname>.+?)(-(?<type>gatekeeper|aclkeeper|owner))?$/) {
-            my $groupname = $+{'groupname'};
-            my $type = $+{'type'};
-            if (!$type) {
-                # member or guest?
-                my $prefix = $this->remoteName ? "allowed_".$this->remoteName : "allowed";
-                if (-l sprintf("%s/%s.ip.%s", $this->allowkeeperHome, $prefix, $groupname)) { # FIXME MIGRA 
-                    $type = 'member';
-                }
-                else {
-                    $type = 'guest'; # FIXME later: we should check if there is at least one allowed.ip.partial
-                }
-            }
-
-            # if roles is not specified, we return everything, otherwise we return only the
-            # groups whole $this has at least one of the asked roles in
-            if (!$p{'roles'} || any { $type eq $_ } @{ $p{'roles'} }) {
-                $result{$groupname}{$type} = 1;
+    foreach my $Group (values %groups) {
+        foreach my $role (@$roles) {
+            if ($Group->hasRole($this, role => $role)) {
+                $result{$Group->name}{$role} = 1;
             }
         }
     }

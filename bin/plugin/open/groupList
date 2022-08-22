@@ -39,7 +39,7 @@ my $fnret;
 $fnret = OVH::Bastion::get_group_list();
 $fnret or osh_exit $fnret;
 
-my @groupList = keys %{$fnret->value || {}};
+my %groups = %{$fnret->value || {}};
 
 my $includere = OVH::Bastion::build_re_from_wildcards(wildcards => \@includes, implicit_contains => 1)->value;
 my $excludere = OVH::Bastion::build_re_from_wildcards(wildcards => \@excludes, implicit_contains => 1)->value;
@@ -49,8 +49,13 @@ $fnret or osh_exit $fnret;
 
 my %ownGroups = %{$fnret->value || {}};
 
+use Data::Dumper;
+print Dumper(\%groups);
+print Dumper(\%ownGroups);
+
 my $result_hash = {};
-foreach my $Group (@groupList) {
+foreach my $Group (values %groups) {
+    osh_debug("working on $Group");
 
     # if we have excludes, match name against the built regex
     next if ($excludere && $Group->name =~ $excludere);

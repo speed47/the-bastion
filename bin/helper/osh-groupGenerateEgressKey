@@ -102,7 +102,7 @@ $fnret or HEXIT($fnret);
 
 my $key = $fnret->value;
 
-OVH::Bastion::syslogFormatted(
+OVH::Bastion::syslog_formatted(
     severity => 'info',
     type     => 'group',
     fields   => [

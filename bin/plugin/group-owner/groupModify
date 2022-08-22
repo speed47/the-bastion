@@ -82,7 +82,7 @@ my @command = qw{ sudo -n -u };
 push @command, $Group->sysGroup;
 push @command, qw{ -- /usr/bin/env perl -T };
 push @command, $OVH::Bastion::BASEPATH . '/bin/helper/osh-groupModify';
-push @command, '--group', $Group->name;
+push @command, '--group', $Group->sysUser;
 push @command, '--mfa-required', $mfaRequired if $mfaRequired;
 push @command, '--guest-ttl-limit', $ttl if defined $ttl;
 push @command, '--idle-lock-timeout', $idleLockTimeout if defined $idleLockTimeout;

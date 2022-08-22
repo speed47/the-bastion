@@ -35,7 +35,7 @@
 
 ## v3.08.01 - 2022/01/19
 - feat: add osh-remove-empty-folders.sh script
-- enh: better errror detection and logging in accountDelete & groupDelete
+- enh: better error detection and logging in accountDelete & groupDelete
 
 ## v3.08.00 - 2022/01/04
 - feat: move scripts to GnuPG 2.x, add tests & doc
@@ -130,7 +130,7 @@ No changes since rc2.
 ## v3.03.00 - 2021/02/22
 - feat: transmit PIV enforcement status to remote realms, so that the remote policy can be enforced (#33)
 - feat: add `groupGenerateEgressKey` and `groupDelEgressKey` (#135)
-- feat: auto-add hostname as comment in `groupAddServer` and `selfAddPersonalAccesss` (side-note in #60)
+- feat: auto-add hostname as comment in `groupAddServer` and `selfAddPersonalAccess` (side-note in #60)
 - enh: `groupAddGuestAccess` now supports setting a comment (#17, #18)
 - enh: `groupAddServer`: augment the returned JSON with the added server details
 - enh: move unexpected-sudo messages from `security` to `code-warning` type

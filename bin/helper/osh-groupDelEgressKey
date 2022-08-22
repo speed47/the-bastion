@@ -51,7 +51,7 @@ if ($Self->isLocalRoot) {
     osh_debug "Real root, skipping checks of permissions";
 }
 else {
-    $fnret = OVH::Bastion::is_group_owner(account => $Self->name, group => $Group->name, superowner => 1);
+    $fnret = $Group->hasOwner($Self, superowner => 1);
     if (!$fnret) {
         HEXIT('ERR_SECURITY_VIOLATION', msg => "You're not allowed to run this, dear $Self");
     }
@@ -95,7 +95,7 @@ if (@errors) {
         msg => "Couldn't delete one of the files constituting the key, more information available in the system log");
 }
 
-OVH::Bastion::syslogFormatted(
+OVH::Bastion::syslog_formatted(
     severity => 'info',
     type     => 'group',
     fields   => [

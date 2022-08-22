@@ -63,7 +63,7 @@ $stringified .= " " . join(" ", @$remainingOptions) if ($remainingOptions and @$
 
 push @cmd, $stringified;
 
-OVH::Bastion::syslogFormatted(
+OVH::Bastion::syslog_formatted(
     criticity => 'info',
     type      => 'security',
     fields    => [

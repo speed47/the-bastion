@@ -95,7 +95,7 @@ foreach my $accountName (sort keys %accounts) {
         next;
     }
 
-    $fnret = OVH::Bastion::syslogFormatted(
+    $fnret = OVH::Bastion::syslog_formatted(
         severity => 'info',
         type     => 'account',
         fields   => [

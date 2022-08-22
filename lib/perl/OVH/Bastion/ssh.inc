@@ -908,7 +908,7 @@ sub ssh_ingress_keys_piv_apply {
     );
     $fnret or return $fnret;
 
-    OVH::Bastion::syslogFormatted(
+    OVH::Bastion::syslog_formatted(
         severity => 'info',
         type     => 'account',
         fields   => [

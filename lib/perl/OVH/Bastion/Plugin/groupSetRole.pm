@@ -142,7 +142,7 @@ sub preconditions {
             osh_warn "SUPER OWNER OVERRIDE: You're not a $neededright of the group $Group,";
             osh_warn "but allowing because you're a superowner. This has been logged.";
 
-            OVH::Bastion::syslogFormatted(
+            OVH::Bastion::syslog_formatted(
                 criticity => 'info',
                 type      => 'security',
                 fields    => [
@@ -389,7 +389,7 @@ sub act {
 
     # don't log on OK_NO_CHANGE, only on OK
     if ($fnret->err eq 'OK') {
-        OVH::Bastion::syslogFormatted(
+        OVH::Bastion::syslog_formatted(
             severity => 'info',
             type     => 'membership',
             fields   => [

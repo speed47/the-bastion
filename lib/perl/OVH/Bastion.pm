@@ -38,7 +38,7 @@ BEGIN {
         $criticity = 'info' if (defined $msg and $msg =~ m{^Could not finalize SSL connection with client handle});
 
         require Carp;
-        OVH::Bastion::syslogFormatted(
+        OVH::Bastion::syslog_formatted(
             criticity => $criticity,
             type      => $type,
             fields    => [['msg', $msg], ['program', $0], ['cmdline', $_SAVED_ARGV], ['trace', Carp::longmess()]]
@@ -138,160 +138,119 @@ use constant {
 # for i in *.inc ; do bz=$(basename $i .inc) ; echo "$bz => "'[qw{ '$(grep ^sub $i | grep -v 'sub _' | awk '{print $2}' | tr "\n" " ")'}],' ; done
 # for i in *.inc ; do bz=$(basename $i .inc) ; printf "$bz => [qw{\n"; grep ^sub $i | grep -v 'sub _' | awk '{print "\t"$2}' | sort; printf "\t}],\n" ; done
 my %_autoload_files = (
-    allowdeny => [
-        qw{
-          duration2human
-          get_acls
-          get_acl_way
-          get_group_keys
-          get_ip
-          get_pub_keys_from_directory
-          ip2host
-          is_access_granted
-          is_access_way_granted
-          print_acls
-          ssh_test_access_to
-          }
-    ],
-    allowkeeper => [
-        qw{
-          access_modify
-          build_re_from_wildcards
-          get_account_list
-          get_group_list
-          get_next_available_uid
-          get_realm_list
-          get_remote_accounts_from_realm
-          is_bastion_account_valid_and_existing
-          is_group_aclkeeper
-          is_group_existing
-          is_group_gatekeeper
-          is_group_guest
-          is_group_member
-          is_group_owner
-          is_user_in_group
-          is_valid_group
-          is_valid_group_and_existing
-          is_valid_ttl
-          is_valid_uid
-          }
-    ],
-    configuration => [
-        qw{
-          config
-          group_config
-          json_load
-          load_configuration
-          load_configuration_file
-          main_configuration_directory
-          plugin_config
-          }
-    ],
-    execute => [
-        qw{
-          execute
-          execute_simple
-          helper
-          helper_decapsulate
-          result_from_helper
-          sysret2human
-          }
-    ],
-    interactive => [
-        qw{
-          interactive
-          }
-    ],
-    jail => [
-        qw{
-          jailify
-          }
-    ],
-    log => [
-        qw{
-          info_syslog
-          log_access_get
-          log_access_insert
-          log_access_update
-          syslog
-          syslog_close
-          syslogFormatted
-          warn_syslog
-          }
-    ],
-    mock => [
-        qw{
-          enable_mocking
-          is_mocking
-          mock_get_account_accesses
-          mock_get_account_entry
-          mock_get_account_guest_accesses
-          mock_get_account_legacy_accesses
-          mock_get_account_personal_accesses
-          mock_get_group_accesses
-          set_mock_data
-          }
-    ],
-    os => [
-        qw{
-          has_acls
-          is_bsd
-          is_debian
-          is_freebsd
-          is_in_path
-          is_linux
-          is_netbsd
-          is_openbsd
-          is_redhat
-          sys_addmembertogroup
-          sys_changepassword
-          sys_delmemberfromgroup
-          sys_clear_cache
-          sys_getgr_all
-          sys_getgr_all_cached
-          sys_getgr_name
-          sys_getpasswordinfo
-          sys_getpw_all
-          sys_getpw_all_cached
-          sys_getpw_name
-          sys_getsudoersfolder
-          sys_groupadd
-          sys_groupdel
-          sysinfo
-          sys_neutralizepassword
-          sys_setfacl
-          sys_setpasswordpolicy
-          sys_useradd
-          sys_userdel
-          }
-    ],
-    password => [
-        qw{
-          get_hashes_from_password
-          get_hashes_list
-          get_password_file
-          is_valid_hash
-          }
-    ],
-    ssh => [
-        qw{
-          add_key_to_authorized_keys_file
-          generate_ssh_key
-          get_authorized_keys_from_file
-          get_bastion_ips
-          get_from_for_user_key
-          get_ssh_pub_key_info
-          get_supported_ssh_algorithms_list
-          has_piv_helper
-          is_allowed_algo_and_size
-          is_valid_fingerprint
-          is_valid_public_key
-          print_public_key
-          put_authorized_keys_to_file
-          ssh_ingress_keys_piv_apply
-          verify_piv
-          }
-    ],
+    allowdeny => [qw{
+        duration2human
+        get_acl_way
+        get_ip
+        get_pub_keys_from_directory
+        ip2host
+        is_access_granted
+        is_access_way_granted
+        print_acls
+        ssh_test_access_to
+        }],
+    allowkeeper => [qw{
+        access_modify
+        build_re_from_wildcards
+        get_account_list
+        get_group_list
+        get_next_available_uid
+        get_realm_list
+        is_user_in_group
+        is_valid_ttl
+        is_valid_uid
+        }],
+    configuration => [qw{
+        config
+        json_load
+        load_configuration
+        load_configuration_file
+        main_configuration_directory
+        plugin_config
+        }],
+    execute => [qw{
+        execute
+        execute_simple
+        helper
+        helper_decapsulate
+        result_from_helper
+        sysret2human
+        }],
+    interactive => [qw{interactive}],
+    jail => [qw{jailify}],
+    log => [qw{
+        info_syslog
+        log_access_get
+        log_access_insert
+        log_access_update
+        syslog
+        syslog_close
+        syslog_formatted
+        warn_syslog
+        }],
+    mock => [qw{
+        enable_mocking
+        is_mocking
+        mock_get_account_accesses
+        mock_get_account_entry
+        mock_get_account_guest_accesses
+        mock_get_account_legacy_accesses
+        mock_get_account_personal_accesses
+        mock_get_group_accesses
+        set_mock_data
+        }],
+    os => [qw{
+        has_acls
+        is_bsd
+        is_debian
+        is_freebsd
+        is_in_path
+        is_linux
+        is_netbsd
+        is_openbsd
+        is_redhat
+        sys_addmembertogroup
+        sys_changepassword
+        sys_clear_cache
+        sys_delmemberfromgroup
+        sys_getgr_all
+        sys_getgr_name
+        sys_getpasswordinfo
+        sys_getpw_all
+        sys_getpw_name
+        sys_getsudoersfolder
+        sys_groupadd
+        sys_groupdel
+        sysinfo
+        sys_neutralizepassword
+        sys_setfacl
+        sys_setpasswordpolicy
+        sys_useradd
+        sys_userdel
+        }],
+    password => [qw{
+        get_hashes_from_password
+        get_hashes_list
+        get_password_file
+        is_valid_hash
+        }],
+    ssh => [qw{
+        add_key_to_authorized_keys_file
+        generate_ssh_key
+        get_authorized_keys_from_file
+        get_bastion_ips
+        get_from_for_user_key
+        get_ssh_pub_key_info
+        get_supported_ssh_algorithms_list
+        has_piv_helper
+        is_allowed_algo_and_size
+        is_valid_fingerprint
+        is_valid_public_key
+        print_public_key
+        put_authorized_keys_to_file
+        ssh_ingress_keys_piv_apply
+        verify_piv
+        }],
 );
 
 sub AUTOLOAD {    ## no critic (AutoLoading)
@@ -1074,16 +1033,12 @@ sub check_args {
 
     # log verbose info in logs
     my $callerStack = OVH::Bastion::call_stack(1);
-    warn_syslog(
-        sprintf(
-            "check_args: mandatory parameters '@errorMissing' missing in call to %s by %s",
-            $callerStack, $0
-        )
+    warn_syslog(sprintf("check_args: mandatory parameters '@errorMissing' missing %s by %s", $callerStack, $0)
     ) if @errorMissing;
-    warn_syslog(sprintf("check_args: unknown parameters '@errorUnknown' in call to %s by %s", $callerStack, $0))
-      if @errorUnknown;
-    warn_syslog(sprintf("check_args: false value for parameters '@errorFalse' in call to %s by %s", $callerStack, $0))
-      if @errorFalse;
+    warn_syslog(sprintf("check_args: unknown parameters '@errorUnknown' %s by %s", $callerStack, $0)
+    ) if @errorUnknown;
+    warn_syslog(sprintf("check_args: false value for parameters '@errorFalse' %s by %s", $callerStack, $0)
+    ) if @errorFalse;
 
     return R('ERR_MISSING_ARGUMENT', msg => "Missing arguments: @errorMissing") if @errorMissing;
     return R('ERR_UNKNOWN_ARGUMENT', msg => "Unknown arguments: @errorUnknown") if @errorUnknown;

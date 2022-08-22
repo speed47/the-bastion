@@ -837,7 +837,7 @@ EOS
     # group1: a1(owner,aclkeeper,gatekeeper,member) a2() servers()
     plgfail dup $a0 --osh groupCreate --group $group1 --algo rsa --size 4096 --owner $account2
     contain "The group $group1 already exists"
-    json .command groupCreate .error_code KO_ALREADY_EXISTING .value      null
+    json .command groupCreate .error_code ERR_GROUP_ALREADY_EXISTS .value      null
 
     revoke groupCreate
 

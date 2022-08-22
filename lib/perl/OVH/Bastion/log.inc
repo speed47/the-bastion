@@ -47,8 +47,7 @@ END {
     syslog_close();
 }
 
-sub syslogFormatted {
-
+sub syslog_formatted {
     # do NOT use warn_syslog in this func, or we would loop. warn() is fine.
     my %params    = @_;
     my $criticity = $params{'criticity'} || 'info';
@@ -56,7 +55,7 @@ sub syslogFormatted {
     my $fieldsref = $params{'fields'};
 
     if (ref $fieldsref ne 'ARRAY') {
-        my $error = "bad call to syslogFormatted, invalid fields parameter";
+        my $error = "bad call to syslog_formatted, invalid fields parameter";
         warn($error);    # this will in turn log into syslog with the trace() thanks to the SIG{'WARN'} handler
         return R('INTERNAL_ERROR', msg => $error);
     }
@@ -84,7 +83,7 @@ sub syslogFormatted {
 
         # each $item item is a 2-dimensional array for key => value
         if (ref $item ne 'ARRAY') {
-            my $error = "bad call to syslogFormatted, invalid item in fields (ref " . (ref $item) . ")";
+            my $error = "bad call to syslog_formatted, invalid item in fields (ref " . (ref $item) . ")";
             warn($error);
             return R('INTERNAL_ERROR', msg => $error);
         }
@@ -92,7 +91,7 @@ sub syslogFormatted {
 
         # warn if we have the same key more than once
         if (exists $dedupe{$key}) {
-            warn("syslogFormatted(): got multiple '$key' keys");
+            warn("syslog_formatted(): got multiple '$key' keys");
         }
         $dedupe{$key} = $value;
 
@@ -116,7 +115,7 @@ sub warn_syslog {
     my $msg   = shift;
     my $noisy = shift;
     osh_warn("WARN: " . $msg) if $noisy;
-    return syslogFormatted(
+    return syslog_formatted(
         type   => 'code-warning',
         fields => [['msg' => $msg]]
     );
@@ -124,7 +123,7 @@ sub warn_syslog {
 
 sub info_syslog {
     my $msg = shift;
-    return syslogFormatted(
+    return syslog_formatted(
         type   => 'code-info',
         fields => [['msg' => $msg]]
     );
@@ -229,42 +228,26 @@ EOS
     return R('OK', msg => "sql update done");
 }
 
+# don't call me directly, use sql_log_insert() !
 sub _sql_log_insert_file {
+    my %p = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ file account cmdtype timestamp timestampusec uniqid sqltype }],
+        mandatoryFalseOk => [qw{ allowed hostfrom ipfrom portfrom bastionip bastionport
+            hostto ipto portto user }],
+        optionalFalseOk => [qw{ plugin params comment ttyrecfile }],
+    );
+    $fnret or return $fnret;
 
-    # don't call me directly, use sql_log_insert() !
-    my %params        = @_;
-    my $file          = $params{'file'};
-    my $account       = $params{'account'};
-    my $cmdtype       = $params{'cmdtype'};
-    my $allowed       = $params{'allowed'};
-    my $hostfrom      = $params{'hostfrom'};
-    my $ipfrom        = $params{'ipfrom'};
-    my $portfrom      = $params{'portfrom'};
-    my $bastionip     = $params{'bastionip'};
-    my $bastionport   = $params{'bastionport'};
-    my $hostto        = $params{'hostto'};
-    my $ipto          = $params{'ipto'};
-    my $portto        = $params{'portto'};
-    my $user          = $params{'user'};
-    my $plugin        = $params{'plugin'};
-    my $params        = $params{'params'};
-    my $comment       = $params{'comment'};
-    my $ttyrecfile    = $params{'ttyrecfile'};
-    my $timestamp     = $params{'timestamp'};
-    my $timestampusec = $params{'timestampusec'};
-    my $uniqid        = $params{'uniqid'};
-    my $sqltype       = $params{'sqltype'};
-
-    if ($sqltype ne 'local' and $sqltype ne 'global') {
+    if ($p{'sqltype'} ne 'local' and $p{'sqltype'} ne 'global') {
         return R('ERR_INVALID_PARAMETER', msg => "Invalid parameter sqltype");
     }
 
-    if ($sqltype eq 'global') {
-
+    if ($p{'sqltype'} eq 'global') {
         # if it doesn't exist yet, create the file ourselves, chgrp it to bastion-users and set the
         # proper rights (0660). if the file already exists, we won't do anything.
         # -journal -shm and -wal files are created with same perms by sqlite
-        OVH::Bastion::create_file_if_not_exists(file => $file, perms => oct(660), group => "bastion-users");
+        OVH::Bastion::create_file_if_not_exists(file => $p{'file'}, perms => oct(660), group => "bastion-users");
     }
 
     # big db-related retry block:
@@ -287,13 +270,13 @@ sub _sql_log_insert_file {
         undef $doing;
 
         # connect to db
-        $dbh = DBI->connect("dbi:SQLite:dbname=$file", "", "", {PrintError => 0, RaiseError => 0});
+        $dbh = DBI->connect("dbi:SQLite:dbname=".$p{'file'}, "", "", {PrintError => 0, RaiseError => 0});
         if (!$dbh) {
-            $doing = "opening database";
+            $doing = "opening database (write)";
             next;    # retry
         }
 
-        my $fnret = _sql_update_db(dbh => $dbh, sqltype => $sqltype);
+        my $fnret = _sql_update_db(dbh => $dbh, sqltype => $p{'sqltype'});
         if (!$fnret) {
             $doing = $fnret->msg;
             next;    # retry
@@ -302,20 +285,22 @@ sub _sql_log_insert_file {
         # preparing data insertion query
         my $prepare;
         my @execute;
-        if ($sqltype eq 'local') {
+        if ($p{'sqltype'} eq 'local') {
             @execute = (
-                $uniqid, $timestamp, $timestampusec, $account,     $cmdtype, $allowed, $hostfrom,
-                $ipfrom, $portfrom,  $bastionip,     $bastionport, $hostto,  $ipto,    $portto,
-                $user,   $plugin,    $params,        $comment,     $ttyrecfile
+                $p{'uniqid'}, $p{'timestamp'}, $p{'timestampusec'}, $p{'account'},     $p{'cmdtype'}, $p{'allowed'}, $p{'hostfrom'},
+                $p{'ipfrom'}, $p{'portfrom'},  $p{'bastionip'},     $p{'bastionport'}, $p{'hostto'},  $p{'ipto'},    $p{'portto'},
+                $p{'user'},   $p{'plugin'},    $p{'params'},        $p{'comment'},     $p{'ttyrecfile'}
             );
             $prepare =
-                "INSERT INTO connections"
-              . "(uniqid,timestamp,timestampusec,account,cmdtype,allowed,hostfrom,ipfrom,portfrom,bastionip,bastionport,hostto,ipto,portto,user,plugin,params,comment,ttyrecfile)"
-              . 'VALUES ('
-              . ('?,' x (@execute - 1)) . '?)';
+                "INSERT INTO connections ("
+              . "uniqid, timestamp,  timestampusec,  account,       cmdtype,  allowed,  hostfrom,"
+              . "ipfrom, portfrom,   bastionip,      bastionport,   hostto,   ipto,     portto,"
+              . "user,   plugin,     params,         comment,       ttyrecfile"
+              . ') VALUES ('. ('?,' x (@execute - 1)) . '?)';
         }
-        elsif ($sqltype eq 'global') {
-            @execute = ($uniqid, $timestamp, $account, $cmdtype, $allowed, $ipfrom, $ipto, $portto, $user, $plugin);
+        elsif ($p{'sqltype'} eq 'global') {
+            @execute = ($p{'uniqid'}, $p{'timestamp'}, $p{'account'}, $p{'cmdtype'}, $p{'allowed'},
+                $p{'ipfrom'}, $p{'ipto'}, $p{'portto'}, $p{'user'}, $p{'plugin'});
             $prepare =
               "INSERT INTO connections_summary (uniqid,timestamp,account,cmdtype,allowed,ipfrom,ipto,portto,user,plugin)"
               . 'VALUES ('
@@ -342,21 +327,35 @@ sub _sql_log_insert_file {
 
     # if this is set, we probably reached max retry in previous loop without succeeding
     if ($DBI::err) {
-
-        warn_syslog(
-            "Failed after multiple retries [$sqltype] err $DBI::err while doing [$doing]: $DBI::errstr ($file)");
-        return R('ERR_SQL_EXECUTE', msg => "SQL error [$sqltype] err $DBI::err while doing [$doing]: $DBI::errstr");
+        my $exists   = -f $p{'file'} ? "exists" : "doesn't exist";
+        my $readable = -r $p{'file'} ? "readable" : "non-readable";
+        my $writable = -w $p{'file'} ? "writable" : "non-writable";
+        warn_syslog("Failed after multiple retries [".$p{'sqltype'}."] err $DBI::err "
+            . "while doing [$doing]: $DBI::errstr (".$p{'file'}.", $exists, $readable, $writable)");
+        return R('ERR_SQL_EXECUTE', msg => "SQL error [".$p{'sqltype'}."] while doing [$doing]: $DBI::errstr");
     }
 
     return R('OK', value => {id => $dbh->last_insert_id("", "", "", "")});
 }
 
 sub log_access_insert {
-    my %params  = @_;
-    my $Account = $params{'Account'};
-    my $uniqid  = $params{'uniqid'} || $ENV{'UNIQID'};
-    my $loghome = $params{'loghome'};                    # only used for proxyhttp
-    my $custom  = $params{'custom'};                     # only used for proxyhttp, not pushed to sql
+    my %p = @_;
+    $p{'uniqid'} ||= $ENV{'UNIQID'};
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ Account }],
+        optional => [qw{ uniqid loghome custom }],
+        # stuff passed down to _sql_log_insert_file:
+        optionalFalseOk => [qw{
+            cmdtype bastionip bastionport params ipfrom ipto hostfrom
+            portto comment user allowed plugin hostto portfrom
+            ttyrecfile
+        }],
+    );
+    $fnret or return $fnret;
+
+    my $Account = delete $p{'Account'};
+    # 'loghome' is only used for proxyhttp
+    my $custom  = $p{'custom'};                     # only used for proxyhttp, not pushed to sql
     my $fnret;
 
     # if we get a valid account, we'll try to log to its files, if enabled.
@@ -364,30 +363,19 @@ sub log_access_insert {
     # Account can be a normal account or a realm account, in case osh.pl is erroring early and couldn't
     # rresolve the proper remote account (realm/user format)
 
-    if ($Account) {
-        $loghome ||= $Account->sysUser;
-    }
+    my $loghome = delete $p{'loghome'} || $Account->sysUser;
+    $p{'account'} = $Account->name;
 
-    $params{'Account'} = $Account;
-    $params{'loghome'} = $loghome;
-
-    if (not defined $uniqid) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'uniqid'");
+    if (not defined $p{'hostto'} and defined $p{'ipto'}) {
+        $p{'hostto'} = OVH::Bastion::ip2host($p{'ipto'})->value;
     }
-
-    if (not defined $params{'bastionhost'} and defined $params{'bastionip'}) {
-        $params{'bastionhost'} = OVH::Bastion::ip2host($params{'bastionip'})->value;
-    }
-    if (not defined $params{'hostto'} and defined $params{'ipto'}) {
-        $params{'hostto'} = OVH::Bastion::ip2host($params{'ipto'})->value;
-    }
-    if (not defined $params{'hostfrom'} and defined $params{'ipfrom'}) {
-        $params{'hostfrom'} = OVH::Bastion::ip2host($params{'ipfrom'})->value;
+    if (not defined $p{'hostfrom'} and defined $p{'ipfrom'}) {
+        $p{'hostfrom'} = OVH::Bastion::ip2host($p{'ipfrom'})->value;
     }
 
     my ($timestamp, $timestampusec) = Time::HiRes::gettimeofday();
-    $params{'timestamp'}     = $timestamp;
-    $params{'timestampusec'} = $timestampusec;
+    $p{'timestamp'}     = $timestamp;
+    $p{'timestampusec'} = $timestampusec;
 
     # 1/3) log into sql databases if enabled
     my @localtime = localtime(time());
@@ -396,16 +384,16 @@ sub log_access_insert {
     # first, log in account db
     my $accountsql = 'no';
     if (OVH::Bastion::config('enableAccountSqlLog')->value()) {
-        if ($loghome && -d "/home/$loghome") {
+        if (-d "/home/$loghome") {
             my $sqlfile = sprintf(
                 "/home/%s/%s-log-%04d%02d.sqlite",
                 $loghome,
-                $Account ? $Account->remoteName : $loghome,
+                $loghome || $Account->remoteName,
                 $localtime[5] + 1900,
                 $localtime[4] + 1
             );
             $fnret = _sql_log_insert_file(
-                %params,
+                %p,
                 sqltype => "local",
                 file    => $sqlfile
             );
@@ -418,7 +406,7 @@ sub log_access_insert {
             }
         }
         else {
-            warn_syslog("Attempted to log to account $Account sqlite database without a valid loghome ($loghome)");
+            warn_syslog("Attempted to log to ${Account}'s sqlite db without a valid loghome ($loghome)");
         }
     }
 
@@ -426,7 +414,7 @@ sub log_access_insert {
     my $globalsql = 'no';
     if (OVH::Bastion::config('enableGlobalSqlLog')->value()) {
         $fnret = _sql_log_insert_file(
-            %params,
+            %p,
             sqltype => "global",
             file    => sprintf("/home/logkeeper/global-log-%04d%02d.sqlite", $localtime[5] + 1900, $localtime[4] + 1)
         );
@@ -434,26 +422,25 @@ sub log_access_insert {
     }
 
     # 2/3) push to syslog, we'll also say if any sqlinsert failed through globalsql/accountsql
-    # even if syslog is disabled, syslogFormatted() will return a oneline $msg that we'll use afterwards
+    # even if syslog is disabled, syslog_formatted() will return a oneline $msg that we'll use afterwards
     my @fields = (
         ['account', ($Account?$Account->name:'')],
-        ['cmdtype', $params{'cmdtype'}],
-        ['allowed', ($params{'allowed'} ? 'true' : 'false')],
-        ['ip_from',      $params{'ipfrom'}],
-        ['port_from',    $params{'portfrom'}],
-        ['host_from',    $params{'hostfrom'}],
-        ['ip_bastion',   $params{'bastionip'}],
-        ['port_bastion', $params{'bastionport'}],
-        ['host_bastion', $params{'bastionhost'}],
-        ['user',         $params{'user'}],
-        ['ip_to',        $params{'ipto'}],
-        ['port_to',      $params{'portto'}],
-        ['host_to',      $params{'hostto'}],
-        ['plugin',       $params{'plugin'}],
+        ['cmdtype', $p{'cmdtype'}],
+        ['allowed', ($p{'allowed'} ? 'true' : 'false')],
+        ['ip_from',      $p{'ipfrom'}],
+        ['port_from',    $p{'portfrom'}],
+        ['host_from',    $p{'hostfrom'}],
+        ['ip_bastion',   $p{'bastionip'}],
+        ['port_bastion', $p{'bastionport'}],
+        ['user',         $p{'user'}],
+        ['ip_to',        $p{'ipto'}],
+        ['port_to',      $p{'portto'}],
+        ['host_to',      $p{'hostto'}],
+        ['plugin',       $p{'plugin'}],
         ['globalsql',    $globalsql],
         ['accountsql',   $accountsql],
-        ['comment',      $params{'comment'}],
-        ['params',       $params{'params'}],
+        ['comment',      $p{'comment'}],
+        ['p',       $p{'p'}],
     );
     if (ref $custom eq 'ARRAY') {
         foreach my $item (@$custom) {
@@ -461,27 +448,28 @@ sub log_access_insert {
         }
     }
 
-    $fnret = syslogFormatted(
+    $fnret = syslog_formatted(
         criticity => 'info',
         type      => 'open',
         fields    => \@fields,
     );
 
-    # if syslogFormatted failed, we'll log its error message (->msg) instead of the message it couldn't assemble (->value)
+    # if syslog_formatted failed, we'll log its error message (->msg)
+    # instead of the message it couldn't assemble (->value)
     my $msg = $fnret ? $fnret->value : $fnret->msg;
 
-    # 3/3) push to our own local / global text logs, if enabled, using the $msg returned by syslogFormatted
+    # 3/3) push to our own local / global text logs, if enabled, using the $msg returned by syslog_formatted
     _write_log(Account => $Account, msg => $msg);
 
     # save this for log_access_update()
     my $cache = {
         fields        => \@fields,
-        timestamp     => $params{'timestamp'},
-        timestampusec => $params{'timestampusec'},
+        timestamp     => $p{'timestamp'},
+        timestampusec => $p{'timestampusec'},
     };
-    $ENV{'LOG_CACHE_' . $params{'uniqid'}} = encode_json($cache);
+    $ENV{'LOG_CACHE_' . $p{'uniqid'}} = encode_json($cache);
 
-    return R('OK', value => {insert_id => $insert_id, db_name => $db_name, uniq_id => $params{'uniqid'}});
+    return R('OK', value => {insert_id => $insert_id, db_name => $db_name, uniq_id => $p{'uniqid'}});
 }
 
 sub _sql_log_update_file {
@@ -520,7 +508,7 @@ sub _sql_log_update_file {
         # connect to db
         $dbh = DBI->connect("dbi:SQLite:dbname=$file", "", "", {PrintError => 0, RaiseError => 0});
         if (!$dbh) {
-            $doing = "opening database";
+            $doing = "opening database (write)";
             next;    # retry
         }
 
@@ -554,9 +542,12 @@ sub _sql_log_update_file {
 
     # if this is set, we probably reached max retry in previous loop without succeeding
     if ($DBI::err) {
-        warn_syslog(
-            "Failed after multiple retries [updating] err $DBI::err while doing [$doing]: $DBI::errstr ($file)");
-        return R('ERR_SQL_EXECUTE', msg => "SQL error [updating] err $DBI::err while doing [$doing]: $DBI::errstr");
+        my $exists   = -f $file ? "exists" : "doesn't exist";
+        my $readable = -r $file ? "readable" : "non-readable";
+        my $writable = -w $file ? "writable" : "non-writable";
+        warn_syslog("Failed after multiple retries [updating] err $DBI::err "
+            . "while doing [$doing]: $DBI::errstr ($file, $exists, $readable, $writable)");
+        return R('ERR_SQL_EXECUTE', msg => "SQL error [updating] while doing [$doing]: $DBI::errstr");
     }
 
     # if we have plugin stdout or stderr, log it too
@@ -577,7 +568,7 @@ sub _sql_log_update_file {
             # connect to db
             $dbh = DBI->connect("dbi:SQLite:dbname=$file", "", "", {PrintError => 0, RaiseError => 0});
             if (!$dbh) {
-                $doing = "opening database";
+                $doing = "opening database (write)";
                 next;    # retry
             }
 
@@ -617,9 +608,12 @@ EOS
 
         # if this is set, we probably reached max retry in previous loop without succeeding
         if ($DBI::err) {
-            warn_syslog(
-                "Failed after multiple retries [plugins] err $DBI::err while doing [$doing]: $DBI::errstr ($file)");
-            return R('ERR_SQL_EXECUTE', msg => "SQL error [plugins] err $DBI::err while doing [$doing]: $DBI::errstr");
+            my $exists   = -f $file ? "exists" : "doesn't exist";
+            my $readable = -r $file ? "readable" : "non-readable";
+            my $writable = -w $file ? "writable" : "non-writable";
+            warn_syslog("Failed after multiple retries [plugins] err $DBI::err "
+                . "while doing [$doing]: $DBI::errstr ($file, $exists, $readable, $writable)");
+            return R('ERR_SQL_EXECUTE', msg => "SQL error [plugins] while doing [$doing]: $DBI::errstr");
         }
     }
 
@@ -736,146 +730,140 @@ sub log_access_update {
     }
 
     # 2/3) push to syslog, we'll also say if the sql update failed through accountsql
-    # even if syslog is disabled, syslogFormatted() will return a oneline $msg that we'll use afterwards
+    # even if syslog is disabled, syslog_formatted() will return a oneline $msg that we'll use afterwards
     push @fields, [accountsql_close => $accountsql];
-    $fnret = syslogFormatted(
+    $fnret = syslog_formatted(
         criticity => 'info',
         type      => 'close',
         fields    => \@fields,
     );
 
-    # if syslogFormatted failed, we'll log its error message (->msg) instead of the message it couldn't assemble (->value)
+    # if syslog_formatted failed, we'll log its error message (->msg) instead of the message it couldn't assemble (->value)
     my $msg = $fnret ? $fnret->value : $fnret->msg;
 
-    # 3/3) push to our own local / global text logs, if enabled, using the $msg returned by syslogFormatted
+    # 3/3) push to our own local / global text logs, if enabled, using the $msg returned by syslog_formatted
     _write_log(Account => $Account, msg => $msg);
 
     return R('OK');
 }
 
 sub log_access_get {
-    my %params  = @_;
-    my $account = $params{'account'};
-    my $fnret;
+    my %p = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ Account }],
+        # stuff passed down to _sql_log_fetch_from_file
+        optionalFalseOk => [qw{ uniqid cmdtype after before allowed ipfrom ipto
+            portto bastionip bastionport toPort user limit plugin
+        }],
+    );
+    $fnret or return $fnret;
 
-    if (not defined $account) {
-        return R('ERR_MISSING_PARAMETER', msg => "Missing parameter 'account'");
-    }
-
-    my $Account = OVH::Bastion::Account->newFromName($account, check => 1);
+    my $Account = $p{'Account'};
     $Account or return $Account;
 
-    $params{'Account'} = $Account;
+    $fnret = $Account->check();
+    $fnret or return $fnret;
 
     my ($timestamp, $timestampusec) = Time::HiRes::gettimeofday();
-    $params{'timestamp'}     = $timestamp;
-    $params{'timestampusec'} = $timestampusec;
+    $p{'timestamp'}     = $timestamp;
+    $p{'timestampusec'} = $timestampusec;
 
     my @localtime = localtime(time());
 
     # check in account sql file
     if (OVH::Bastion::config('enableAccountSqlLog')->value()) {
-        $params{'file'} = sprintf(
+        $p{'file'} = sprintf(
             "%s/%s-log-%04d%02d.sqlite",
             $Account->home, $Account->remoteName || $Account->sysUser,
             $localtime[5] + 1900,
             $localtime[4] + 1
         );
-        $params{'sqltype'} = 'local';
-        $fnret = _sql_log_fetch_from_file(%params);
+        $p{'sqltype'} = 'local';
+        $fnret = _sql_log_fetch_from_file(%p);
         return $fnret;
     }
 
     return R('ERR_DISABLED', msg => "This feature is not available");
 }
 
+# don't call me directly, use log_access_get() !
 sub _sql_log_fetch_from_file {
-
-    # don't call me directly, use log_access_get() !
-    my %params      = @_;
-    my $file        = $params{'file'};
-    my $sqltype     = $params{'sqltype'};
-    my $limit       = $params{'limit'};
-    my $uniqid      = $params{'uniqid'};
-    my $Account     = $params{'Account'};
-    my $cmdtype     = $params{'cmdtype'};
-    my $allowed     = $params{'allowed'};
-    my $ipfrom      = $params{'ipfrom'};
-    my $ipto        = $params{'ipto'};
-    my $portto      = $params{'portto'};
-    my $bastionip   = $params{'bastionip'};
-    my $bastionport = $params{'bastionport'};
-    my $user        = $params{'user'};
-    my $plugin      = $params{'plugin'};
-    my $before      = $params{'before'};
-    my $after       = $params{'after'};
+    my %p = @_;
+    my $fnret = OVH::Bastion::check_args(\%p,
+        mandatory => [qw{ file sqltype timestamp timestampusec }],
+        optional => [qw{ Account }],
+        optionalFalseOk => [qw{ uniqid cmdtype after before allowed ipfrom ipto
+            portto bastionip bastionport toPort user limit file plugin
+        }],
+    );
+    $fnret or return $fnret;
 
     foreach my $param (qw{ limit before after }) {
-        if (defined $params{$param} and $params{$param} !~ /^\d+$/) {
+        if (defined $p{$param} && $p{$param} !~ /^\d+$/) {
             return R('ERR_INVALID_PARAMETER', msg => "Expected a numeric $param");
         }
     }
 
     my @conditions;
     my @execvalues;
-    if ($Account) {
+    if ($p{'Account'}) {
         push @conditions, "account = ?";
-        push @execvalues, $Account->name;
+        push @execvalues, $p{'Account'}->name;
     }
-    if ($cmdtype) {
+    if ($p{'cmdtype'}) {
         push @conditions, "cmdtype = ?";
-        push @execvalues, $cmdtype;
+        push @execvalues, $p{'cmdtype'};
     }
-    if (defined $allowed) {
+    if (defined $p{'allowed'}) {
         push @conditions, "allowed = ?";
-        push @execvalues, $allowed ? 1 : 0;
+        push @execvalues, $p{'allowed '} ? 1 : 0;
     }
-    if ($uniqid) {
+    if ($p{'uniqid'}) {
         push @conditions, "uniqid = ?";
-        push @execvalues, $uniqid;
+        push @execvalues, $p{'uniqid'};
     }
-    if ($user) {
+    if ($p{'user'}) {
         push @conditions, "user = ?";
-        push @execvalues, $user;
+        push @execvalues, $p{'user'};
     }
-    if ($plugin) {
+    if ($p{'plugin'}) {
         push @conditions, "plugin = ?";
-        push @execvalues, $plugin;
+        push @execvalues, $p{'plugin'};
     }
-    if ($ipto) {
+    if ($p{'ipto'}) {
         push @conditions, "ipto = ?";
-        push @execvalues, $ipto;
+        push @execvalues, $p{'ipto'};
     }
-    if ($portto) {
+    if ($p{'portto'}) {
         push @conditions, "portto = ?";
-        push @execvalues, $portto;
+        push @execvalues, $p{'portto'};
     }
-    if ($ipfrom) {
+    if ($p{'ipfrom'}) {
         push @conditions, "ipfrom = ?";
-        push @execvalues, $ipfrom;
+        push @execvalues, $p{'ipfrom'};
     }
-    if ($bastionip) {
+    if ($p{'bastionip'}) {
         push @conditions, "bastionip = ?";
-        push @execvalues, $bastionip;
+        push @execvalues, $p{'bastionip'};
     }
-    if ($bastionport) {
+    if ($p{'bastionport'}) {
         push @conditions, "bastionport = ?";
-        push @execvalues, $bastionport;
+        push @execvalues, $p{'bastionport'};
     }
-    if ($before) {
+    if ($p{'before'}) {
         push @conditions, "timestamp <= ?";
-        push @execvalues, $before;
+        push @execvalues, $p{'before'};
     }
-    if ($after) {
+    if ($p{'after'}) {
         push @conditions, "timestamp >= ?";
-        push @execvalues, $after;
+        push @execvalues, $p{'after'};
     }
 
     my $tablename;
-    if ($sqltype eq 'local') {
+    if ($p{'sqltype'} eq 'local') {
         $tablename = 'connections';
     }
-    elsif ($sqltype eq 'global') {
+    elsif ($p{'sqltype'} eq 'global') {
         $tablename = 'connections_summary';
     }
     else {
@@ -884,15 +872,17 @@ sub _sql_log_fetch_from_file {
 
     my $prepare = "SELECT * FROM $tablename WHERE (" . join(') AND (', @conditions) . ") ORDER BY id DESC";
 
-    if ($limit) {
+    if ($p{'limit'}) {
         $prepare .= " LIMIT ?";
-        push @execvalues, $limit;
+        push @execvalues, $p{'limit'};
     }
 
     my $openflags = {PrintError => 0, RaiseError => 0};
     if ($DBD::SQLite::VERSION ge '1.42') {
         eval { $openflags->{'sqlite_open_flags'} = DBD::SQLite::OPEN_READONLY(); };
     }
+
+    osh_debug("SQL query: <$prepare> with params: ". join(", ", @execvalues));
 
     # big db-related retry block (see comment on _sql_log_insert_file)
     my ($dbh, $result, $doing);
@@ -907,9 +897,9 @@ sub _sql_log_fetch_from_file {
         undef $doing;
 
         # connect to db
-        $dbh = DBI->connect("dbi:SQLite:dbname=$file", "", "", $openflags);
+        $dbh = DBI->connect("dbi:SQLite:dbname=".$p{'file'}, "", "", $openflags);
         if (!$dbh) {
-            $doing = "opening database";
+            $doing = "opening database (read)";
             next;    # retry
         }
 
@@ -926,10 +916,12 @@ sub _sql_log_fetch_from_file {
 
     # if this is set, we probably reached max retry in previous loop without succeeding
     if ($DBI::err) {
-
-        warn_syslog(
-            "Failed after multiple retries [$sqltype] err $DBI::err while doing [$doing]: $DBI::errstr ($file)");
-        return R('ERR_SQL_EXECUTE', msg => "SQL error [$sqltype] err $DBI::err while doing [$doing]: $DBI::errstr");
+        my $exists   = -f $p{'file'} ? "exists" : "doesn't exist";
+        my $readable = -r $p{'file'} ? "readable" : "non-readable";
+        my $writable = -w $p{'file'} ? "writable" : "non-writable";
+        warn_syslog("Failed after multiple retries [".$p{'sqltype'}."] err $DBI::err "
+            . "while doing [$doing]: $DBI::errstr (".$p{'file'}.", $exists, $readable, $writable)");
+        return R('ERR_SQL_EXECUTE', msg => "SQL error [".$p{'sqltype'}."] while doing [$doing]: $DBI::errstr");
     }
 
     return R('OK', value => $result);
