@@ -32,7 +32,7 @@ some of the below steps will be done by Puppet. Hence, you might want to only co
 The following Linux distros are tested with each release, but as this is a security product,
 you are *warmly* advised to run it on the latest up-to-date stable version of your favorite OS:
 
-- Debian 12 (Bookworm), 11 (Bullseye), 10 (Buster)
+- Debian 13 (Trixie), 12 (Bookworm), 11 (Bullseye)
 - RockyLinux 8.x, 9.x
 - Ubuntu LTS 24.04, 22.04, 20.04
 - OpenSUSE Leap 15.6\*
@@ -44,11 +44,11 @@ but should work with no or minor adjustments.
 
 The following OS are also tested with each release:
 
-- FreeBSD/HardenedBSD 14.2\*\*
+- FreeBSD/HardenedBSD 14.3\*\*
 
 \*\*: Note that these have partial MFA support, due to their reduced set of available ``pam`` plugins.
 Support for either an additional password or TOTP factor can be configured, but not both at the same time.
-The code is actually known to work on FreeBSD/HardenedBSD 10+, but it's only regularly tested under 14.2.
+The code is actually known to work on FreeBSD/HardenedBSD 10+, but it's only regularly tested under 14.3.
 
 Other BSD variants, such as OpenBSD and NetBSD, are unsupported as they have a severe limitation over the maximum
 number of supplementary groups, causing problems for group membership and restricted commands checks,

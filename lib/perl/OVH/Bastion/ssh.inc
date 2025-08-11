@@ -3,6 +3,7 @@ package OVH::Bastion;
 
 use common::sense;
 
+use List::Util qw{ first };
 use File::Temp;
 use Fcntl qw{ :mode :DEFAULT };
 
@@ -356,7 +357,6 @@ sub get_ssh_pub_key_info {
 =begin comment
 2048 01:c0:37:5e:b4:bf:00:b6:ef:d3:65:a7:5c:60:b1:81  john@doe (RSA)
 521 af:84:cd:70:34:64:ca:51:b2:17:1a:85:3b:53:2e:52  john@doe (ECDSA)
-1024 c0:4d:f7:bf:55:1f:95:59:be:7e:50:47:e4:81:c3:6a  john@doe (DSA)
 256 SHA256:Yggd7VRRbbivxkdVwrdt0HpqKNylMK91nNIU+RxndTI john@doe (ED25519)
 =end comment
 =cut
@@ -621,26 +621,23 @@ sub get_supported_ssh_algorithms_list {
     $fnret or return $fnret;
     my @allowedList = @{$fnret->value};
 
-    # other vary, detect this by running openssh client -V
+    # then detect using ssh -Q key
     my @supportedList;
     if (@cached_runtime_list) {
         @supportedList = @cached_runtime_list;
     }
     else {
-        push @supportedList, 'rsa';    # rsa is always supported
-        $fnret = OVH::Bastion::execute(cmd => [qw{ ssh -V }]);
+        $fnret = OVH::Bastion::execute(cmd => [qw{ ssh -Q key }]);
         if ($fnret) {
-            foreach (@{$fnret->value->{'stdout'} || []}, @{$fnret->value->{'stderr'} || []}) {
-                if (/OpenSSH_(\d+\.\d+)/) {
-                    my $version = $1;
-                    push @supportedList, 'ecdsa'      if ($version gt "5.7");
-                    push @supportedList, 'ed25519'    if ($version gt "6.5");
-                    push @supportedList, 'ecdsa-sk'   if ($version gt "8.2");
-                    push @supportedList, 'ed25519-sk' if ($version gt "8.2");
-                    @cached_runtime_list = @supportedList;
-                    last;
-                }
-            }
+            my @algos = @{$fnret->value->{'stdout'} || []};
+            push @supportedList, 'rsa'     if first { $_ eq 'ssh-rsa' } @algos;
+            push @supportedList, 'ecdsa'   if first { /^ecdsa-sha2-nistp/ } @algos;
+            push @supportedList, 'ed25519' if first { $_ eq 'ssh-ed25519' } @algos;
+            @cached_runtime_list = @supportedList;
+        }
+        else {
+            warn_syslog("Couldn't determine the supported algorithms for pubkeys, using ssh -Q key");
+            return R('ERR_NO_ALGORITHMS', msg => "Couldn't determine the supported SSH algorithms");
         }
     }
 
