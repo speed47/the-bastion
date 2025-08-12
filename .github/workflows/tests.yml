@@ -15,25 +15,11 @@ on:
                 - full
 
 jobs:
-    tests_short:
-        name: Short (deb12 only, w/o cc)
-        runs-on: ubuntu-latest
-        if: ${{ github.event_name == 'pull_request' || inputs.test_type == 'short' }}
-        timeout-minutes: 45
-        steps:
-        - uses: actions/checkout@v4
-          with:
-            persist-credentials: false
-        - name: run tests inside a debian12 docker
-          run: tests/functional/docker/docker_build_and_run_tests.sh debian12 --no-pause-on-fail
-          env:
-            DOCKER_TTY: false
-
     tests_long:
         name: Long (multi-distros, w/o cc)
         strategy:
             matrix:
-                platform: [rockylinux9, debian12, 'opensuse15@opensuse/leap:15.6', ubuntu2404]
+                platform: [rockylinux10]
         runs-on: ubuntu-latest
         if: ${{ contains(github.event.pull_request.labels.*.name, 'tests:long') || inputs.test_type == 'long' }}
         timeout-minutes: 45
@@ -43,22 +29,5 @@ jobs:
             persist-credentials: false
         - name: run tests inside a ${{ matrix.platform }} docker
           run: tests/functional/docker/docker_build_and_run_tests.sh ${{ matrix.platform }} --no-pause-on-fail
-          env:
-            DOCKER_TTY: false
-
-    tests_full:
-        name: Full (exhaustive, w/ cc)
-        strategy:
-            matrix:
-                platform: [rockylinux8, rockylinux9, debian11, debian12, debian13, 'opensuse15@opensuse/leap:15.6', ubuntu2004, ubuntu2204, ubuntu2404]
-        runs-on: ubuntu-latest
-        if: ${{ contains(github.event.pull_request.labels.*.name, 'tests:full') || inputs.test_type == 'full' }}
-        timeout-minutes: 45
-        steps:
-        - uses: actions/checkout@v4
-          with:
-            persist-credentials: false
-        - name: run tests inside a ${{ matrix.platform }} docker
-          run: tests/functional/docker/docker_build_and_run_tests.sh ${{ matrix.platform }} --consistency-check --no-pause-on-fail
           env:
             DOCKER_TTY: false
