@@ -23,7 +23,7 @@ sub get_personal_account_keys {
 
     return _get_pub_keys_from_directory(
         dir         => "/home/$account/.ssh",
-        pattern     => qr/^private\.pub$|^id_[a-z0-9]+[_.]private\.\d+\.pub$/,
+        pattern     => qr/^private\.pub$|^id_[a-z0-9]+[_.]private\.\d+(_\d+)?\.pub$/,
         listOnly    => $listOnly,                                                # don't be slow and don't parse the keys (by calling ssh-keygen -lf)
         forceKey    => $forceKey,
         wantPrivate => 1,

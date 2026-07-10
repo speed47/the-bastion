@@ -4,7 +4,7 @@ package OVH::Bastion;
 use common::sense;
 
 use Config;
-use Fcntl qw{ F_GETFL F_SETFL O_NONBLOCK };
+use Fcntl qw{ F_GETFL F_SETFL F_GETFD F_SETFD F_DUPFD FD_CLOEXEC O_NONBLOCK };
 use IPC::Open3;
 use JSON;
 use Symbol 'gensym';
@@ -130,6 +130,26 @@ sub execute {
         pipe(my $stdin_rh, $stdin_wh) or return R('ERR_SYSCALL_FAILED', msg => "Couldn't create a pipe ($!)");
         binmode $stdin_rh;
         binmode $stdin_wh;
+
+        # When we also request an fd-3 result channel (capture_result_fd, i.e. every helper()), keep our
+        # read end clear of fd 3: as the lowest free fd, pipe() puts it there, but IPC::Run installs the
+        # '3>' channel on the child's fd 3 too. Recent IPC::Run relocates one of them to resolve the
+        # clash; the versions on some supported OSes (e.g. IPC::Run 0.99 on RockyLinux 8) don't, and the
+        # child ends up with our read end (or nothing) on fd 3 instead of the result channel. A helper
+        # then rejects fd 3 (see OVH::Bastion::Helper) and returns nothing (ERR_HELPER_RETURN_EMPTY).
+        # Dup'ing the read end to a high fd sidesteps the clash on every version. F_DUPFD yields a fd
+        # without close-on-exec, so re-set it: IPC::Run dup2()s this onto the child's fd 0 (clearing
+        # cloexec there), and the leftover high fd must not survive exec or it'd hold stdin open past EOF.
+        if ($capture_result_fd) {
+            my $highfd = fcntl($stdin_rh, F_DUPFD, 10);
+            if ($highfd && open(my $high_rh, '<&=', $highfd)) {
+                binmode $high_rh;
+                my $fdflags = fcntl($high_rh, F_GETFD, 0);
+                fcntl($high_rh, F_SETFD, ($fdflags // 0) | FD_CLOEXEC);
+                close($stdin_rh);
+                $stdin_rh = $high_rh;
+            }
+        }
         $in_spec = $stdin_rh;
     }
     elsif ($expects_stdin) {

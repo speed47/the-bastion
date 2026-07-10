@@ -17,6 +17,40 @@ if (!eval { require IPC::Run; 1 }) {
 # we use the running perl as a portable, always-present test program
 my $perl = $^X;
 
+# --- capture_result_fd + stdin_str: the fd-3 result channel must survive the child's module loading --
+# Regression for the groupSetServers path (an ACL fed on stdin, result returned over fd 3). execute()
+# feeds stdin_str through a pipe it owns, and that pipe's read end takes the lowest free fd -- fd 3, the
+# very fd the '3>' result channel targets in the child. IPC::Run 0.99 (RockyLinux 8) mis-resolves the
+# clash, leaving the child's fd 3 NOT wired to the result channel; the child's first `use`/require then
+# grabs the now-free fd 3 to read module source and closes it, so a real helper (which loads
+# OVH::Bastion::Helper before probing fd 3) finds it gone -> ERR_HELPER_RETURN_EMPTY. execute() sidesteps
+# it by relocating the read end off fd 3. Two conditions must both hold to reproduce, and are why this
+# runs FIRST with a module-loading child: fd 3 free in our process (fresh under the test harness, so the
+# read end lands on it) and a module load in the child before it inspects fd 3. A pre-fix execute() on an
+# affected IPC::Run returns empty here; a naive child that writes fd 3 before any `use` would NOT catch it.
+{
+    # child: load modules first (like a helper's `use` chain), THEN probe fd 3 the way
+    # OVH::Bastion::Helper does (a writable FIFO), writing a marker over the channel only if it survived.
+    my $probe_child = <<'PROBE';
+require POSIX; require Fcntl;
+my @st = POSIX::fstat(3);
+my $ok = (@st && Fcntl::S_ISFIFO($st[2])) ? 1 : 0;
+if ($ok && open(my $f, '>&=', 3)) {
+    my $fl = fcntl($f, Fcntl::F_GETFL(), 0);
+    $ok = 0 if (defined $fl && ($fl & Fcntl::O_ACCMODE()) == Fcntl::O_RDONLY());
+    print {$f} 'ADOPTED' if $ok;
+}
+PROBE
+    my $r = OVH::Bastion::execute(
+        cmd               => [$perl, '-e', $probe_child],
+        capture_result_fd => 1,
+        stdin_str         => "server1\nserver2\n",
+    );
+    ok($r, "execute() with capture_result_fd + stdin_str returns a truthy result");
+    is($r->value->{'result_fd_output'},
+        'ADOPTED', "the fd-3 result channel survives a self-fed stdin_str and the child's module loading");
+}
+
 # --- basic exec: exit code, stdout/stderr split, must_succeed -----------------------------------
 # This also guards the exit-code extraction: execute() reads the raw wait status via the plural
 # full_results() to dodge the IPC::Run 20180523.0 full_result($idx) quirk that would otherwise
@@ -164,6 +198,18 @@ my $perl = $^X;
 
     my $content = do { local $/; open(my $fh, '<', $tmpfile) or die "can't read $tmpfile: $!"; <$fh> };
     is($content, "binary-passthrough\n", "child output landed directly on our (redirected) STDOUT");
+}
+
+# --- capture_result_fd: the child's fd-3 result channel round-trips -----------------------------
+# Real helpers return their JSON result over a dedicated fd 3 (see OVH::Bastion::Helper), which
+# execute() wires with IPC::Run's '3>' and hands back as result_fd_output. Guard the basic channel.
+{
+    my $r = OVH::Bastion::execute(
+        cmd => [$perl, '-e', 'open(my $f,q{>&=},3) or die q{no fd3}; print {$f} q{RESULT-OVER-FD3}; close $f;'],
+        capture_result_fd => 1,
+    );
+    ok($r, "execute() with capture_result_fd returns a truthy result");
+    is($r->value->{'result_fd_output'}, 'RESULT-OVER-FD3', "the child's fd-3 write is captured as result_fd_output");
 }
 
 done_testing();
