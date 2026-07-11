@@ -26,7 +26,8 @@ else
     action_doing "Checking whether all required modules are installed..."
     perlcmdline="perl "
     for module in $modules; do
-        action_detail "$module"
+        _ver=$(perl -M$module -e "CORE::say \$$module::VERSION")
+        action_detail "$module $_ver"
         perlcmdline="$perlcmdline -M$module"
     done
     perlcmdline="$perlcmdline -e 1"
