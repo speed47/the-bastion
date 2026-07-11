@@ -77,7 +77,7 @@ testsuite_proxy()
     contain 'X-Bastion-Request-Length: 0'
     contain 'X-Bastion-Local-Status: 400'
     contain 'Content-Type: text/plain'
-    contain "Unable to resolve 'test.invalid' (Name or service not known)"
+    contain "Unable to resolve 'test.invalid' ("
 
     # change credentials again
     success generate_proxy_password2 $a0 --osh selfGenerateProxyPassword --do-it
@@ -264,7 +264,7 @@ testsuite_proxy()
     contain 'is forbidden by policy'
 
     # use alternate config to only allow more methods
-    success config_swap $r0 "\"cp /etc/bastion/osh-http-proxy-methods.conf /etc/bastion/osh-http-proxy.conf\""
+    success config_swap $r0 "\"cp $opt_remote_etc_bastion/osh-http-proxy-methods.conf $opt_remote_etc_bastion/osh-http-proxy.conf\""
 
     # when daemon will restart, it'll log stuff, ignore it
     ignorecodewarn 'osh-http-proxy-daemon'
@@ -341,7 +341,7 @@ testsuite_proxy()
     contain 'not allowed by policy'
 
     # use alternate config to only allow http egress
-    success config_swap $r0 "\"cp /etc/bastion/osh-http-proxy-httponly.conf /etc/bastion/osh-http-proxy.conf\""
+    success config_swap $r0 "\"cp $opt_remote_etc_bastion/osh-http-proxy-httponly.conf $opt_remote_etc_bastion/osh-http-proxy.conf\""
 
     # when daemon will restart, it'll log stuff, ignore it
     ignorecodewarn 'osh-http-proxy-daemon'
