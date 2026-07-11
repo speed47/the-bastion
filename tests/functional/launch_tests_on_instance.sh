@@ -162,6 +162,14 @@ jumphost_ip="${JUMPHOST_IP:-}"
 # shellcheck disable=SC2034
 remoteserver_ip="${REMOTESERVER_IP:-}"
 
+# the ssh ports of the two boxes (default 22). A single-host runner (e.g. the FreeBSD CI, which has no
+# containers) can't give the jumphost port 22, as the bastion's own sshd already owns 0.0.0.0:22, so it
+# runs the jump box on another port and advertises it here.
+# shellcheck disable=SC2034
+jumphost_port="${JUMPHOST_PORT:-22}"
+# shellcheck disable=SC2034
+remoteserver_port="${REMOTESERVER_PORT:-22}"
+
 # the IP (or container name) of a second bastion instance, used by the inter-realm MFA
 # tests as the "remote" bastion.
 # shellcheck disable=SC2034
@@ -259,8 +267,8 @@ check_sourced_module_output()
     # them), so the proxy-jump tests can push the bastion egress keys into the test users there
     rJ=''
     rR=''
-    [ -n "$jumphost_ip" ]     && rJ="$t ssh -F $mytmpdir/ssh_config -i $rootkeyfile root@$jumphost_ip -p 22 -- "
-    [ -n "$remoteserver_ip" ] && rR="$t ssh -F $mytmpdir/ssh_config -i $rootkeyfile root@$remoteserver_ip -p 22 -- "
+    [ -n "$jumphost_ip" ]     && rJ="$t ssh -F $mytmpdir/ssh_config -i $rootkeyfile root@$jumphost_ip -p $jumphost_port -- "
+    [ -n "$remoteserver_ip" ] && rR="$t ssh -F $mytmpdir/ssh_config -i $rootkeyfile root@$remoteserver_ip -p $remoteserver_port -- "
 
     # SSH handles to the second bastion instance (empty unless the runner started it): 'b2' is the
     # admin account (shares account0's key) and 'r2' is root, used by the inter-realm MFA tests to
