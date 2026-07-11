@@ -33,6 +33,7 @@ _ingress_from_test()
     fi
 
     success ${testname}_delkey $a1 --osh selfDelIngressKey -f "$fingerprint"
+    json .command selfDelIngressKey
 
     # now on account creation
     script ${testname}_create_a2 "echo '$keytoadd' | $a0 --osh accountCreate --account $account2 --uid $uid2"
@@ -155,6 +156,7 @@ EOS
     # the old execute() would deadlock on the stdin flood until ttyrec was signal-killed (status=undef
     # -> exit 0); execute() no longer deadlocks and now propagates the plugin's real exit code.
     script  flood   $a1 -osh selfAddIngressKey '<' /dev/urandom
+    json .command selfAddIngressKey
     retvalshouldbe 100
 
     script  privkey $a1 -osh selfAddIngressKey '<<< "-----BEGIN RSA PRIVATE KEY-----
@@ -587,6 +589,7 @@ EOS
 
     # delete account1
     script cleanup $a0 --osh accountDelete --account $account1 "<<< \"Yes, do as I say and delete $account1, kthxbye\""
+    json .command accountDelete
     retvalshouldbe 0
 
     # restore default config
