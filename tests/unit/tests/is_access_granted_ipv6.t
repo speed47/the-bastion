@@ -7,7 +7,6 @@ use Test::Deep;
 use File::Basename;
 use lib dirname(__FILE__) . '/../../../lib/perl';
 use OVH::Bastion;
-use OVH::Result;
 
 # if Net::Netmask is too old, IPv6 is not supported
 if (!OVH::Bastion::system_supports_ipv6()) {

@@ -10,7 +10,7 @@ use lib dirname(__FILE__) . '/../../lib/perl';
 use OVH::Result;
 use OVH::Bastion;
 
-use Fcntl qw(:flock SEEK_END);
+use Fcntl qw( :flock );
 use Getopt::Long;
 use HTTP::Message;
 use IO::Pipe;

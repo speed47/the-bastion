@@ -6,7 +6,6 @@ use Test::More;
 use File::Basename;
 use lib dirname(__FILE__) . '/../../../lib/perl';
 use OVH::Bastion;
-use OVH::Result;
 
 # syslogFormatted() renders audit log fields as a single `key="value" ...` line that is sent to
 # syslog and (verbatim) to the flat-file logs. User-controlled field values (e.g. the `params`

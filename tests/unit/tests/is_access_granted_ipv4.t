@@ -7,7 +7,6 @@ use Test::Deep;
 use File::Basename;
 use lib dirname(__FILE__) . '/../../../lib/perl';
 use OVH::Bastion;
-use OVH::Result;
 
 OVH::Bastion::enable_mocking();
 OVH::Bastion::set_mock_data(

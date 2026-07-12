@@ -6,7 +6,6 @@ use Test::More;
 use File::Basename;
 use lib dirname(__FILE__) . '/../../../lib/perl';
 use OVH::Bastion;
-use OVH::Result;
 
 # execute() now delegates to IPC::Run; if it's not installed here (e.g. a dev machine that
 # never ran packages-check), execute() can't run at all, so skip rather than hard-fail.

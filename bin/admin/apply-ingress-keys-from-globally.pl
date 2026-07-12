@@ -1,12 +1,10 @@
 #! /usr/bin/env perl
 # vim: set filetype=perl ts=4 sw=4 sts=4 et:
 use common::sense;
-use Getopt::Long;
 
 use File::Basename;
 use lib dirname(__FILE__) . '/../../lib/perl';
 use OVH::Bastion;
-use OVH::Result;
 use OVH::SimpleLog;
 
 # this'll be used in syslog

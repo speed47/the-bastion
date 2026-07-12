@@ -3,7 +3,6 @@ use strict;
 use warnings;
 use base qw{Net::Server::HTTP};
 use CGI;
-use Data::Dumper;
 
 __PACKAGE__->run(
     port => ["9080", "9443/ssl"],

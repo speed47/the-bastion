@@ -5,7 +5,6 @@ use List::Util qw{ none };
 
 use File::Basename;
 use lib dirname(__FILE__) . '/../../../lib/perl';
-use OVH::Result;
 use OVH::Bastion;
 use OVH::Bastion::Plugin qw( :DEFAULT help );
 

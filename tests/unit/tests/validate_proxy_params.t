@@ -7,7 +7,6 @@ use Test::Deep;
 use File::Basename;
 use lib dirname(__FILE__) . '/../../../lib/perl';
 use OVH::Bastion;
-use OVH::Result;
 
 # validate_proxy_params() is the single place that both parses the "-J [user@]host[:port]" proxy-jump
 # spec (used by osh.pl and the scp plugin) AND validates an already-split proxy tuple (used by the ACL

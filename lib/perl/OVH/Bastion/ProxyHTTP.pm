@@ -13,7 +13,6 @@ use JSON;
 use Fcntl       qw(:flock);
 use Time::HiRes ();
 use MIME::Base64;
-use Net::Server::PreForkSimple;
 use Net::Server::PreFork;
 use Sys::Hostname;
 use Storable qw{ thaw };

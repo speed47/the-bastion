@@ -6,7 +6,7 @@ use File::Basename;
 use lib dirname(__FILE__) . '/../../../lib/perl';
 use OVH::Result;
 use OVH::Bastion;
-use OVH::Bastion::Plugin qw( :DEFAULT help );
+use OVH::Bastion::Plugin qw( :DEFAULT );
 
 # globally allow sys_getpw* and sys_getgr* cache use
 $ENV{'PW_GR_CACHE'} = 1;

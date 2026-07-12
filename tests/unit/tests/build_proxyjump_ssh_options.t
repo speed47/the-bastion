@@ -7,7 +7,6 @@ use Test::Deep;
 use File::Basename;
 use lib dirname(__FILE__) . '/../../../lib/perl';
 use OVH::Bastion;
-use OVH::Result;
 
 # build_proxyjump_ssh_options() is the single choke point used by osh.pl, scp and
 # ssh_test_access_way to build the "-o ProxyCommand=..." option for egress proxy-jump

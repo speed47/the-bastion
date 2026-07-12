@@ -5,7 +5,6 @@ use common::sense;
 use File::Basename;
 use lib dirname(__FILE__) . '/../../lib/perl';
 use OVH::Bastion;
-use OVH::Result;
 use OVH::SimpleLog;
 
 # this'll be used in syslog
